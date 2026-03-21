@@ -1,4 +1,5 @@
 import handlebars from 'handlebars';
+import type { LangfuseClient } from '@langfuse/client';
 
 import { registerHandlebarsHelpers } from './handlebars-helpers.js';
 import {
@@ -7,7 +8,6 @@ import {
   loadFilesystemTemplates,
 } from './sources/filesystem.js';
 import { loadLangfuseInventory, loadProductionTemplates } from './sources/langfuse.js';
-import type { LangfuseClient } from '@langfuse/client';
 import type {
   TemplateApp,
   TemplateDirectories,

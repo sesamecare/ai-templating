@@ -34,7 +34,7 @@ describe('template file naming', () => {
 
 describe('resolveTemplateDirectories', () => {
   test('defaults to prompts and skills directories under the provided root', () => {
-    expect(resolveTemplateDirectories({ langfuse: {} as never, rootDir: '/repo' })).toEqual({
+    expect(resolveTemplateDirectories({ rootDir: '/repo' })).toEqual({
       promptsDir: path.join('/repo', 'prompts'),
       skillsDir: path.join('/repo', 'skills'),
     });
