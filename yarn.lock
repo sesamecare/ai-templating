@@ -1979,6 +1979,7 @@ __metadata:
     "@openapi-typescript-infra/service": ^6.12.0
     "@semantic-release/exec": ^7.1.0
     "@semantic-release/github": ^12.0.6
+    "@sesamecare-oss/async-pool": ^1.0.5
     "@types/handlebars-helpers": ^0.5.6
     "@types/node": ^25.5.0
     ai: ^6.0.132
@@ -1995,6 +1996,13 @@ __metadata:
     vitest: ^4.1.0
   languageName: unknown
   linkType: soft
+
+"@sesamecare-oss/async-pool@npm:^1.0.5":
+  version: 1.0.5
+  resolution: "@sesamecare-oss/async-pool@npm:1.0.5"
+  checksum: ce7327ed1cb1e47ac86ebb711cd8934b4de46e1930aa6a9c39a3a7533ed178ad94cc1b447495827c17b546d38d33fb5a537681dce150d1eed16a6e44cf8ae499
+  languageName: node
+  linkType: hard
 
 "@sesamecare-oss/confit@npm:^2.2.1":
   version: 2.2.1

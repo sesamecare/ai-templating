@@ -1,6 +1,6 @@
 # ai-templating
 
-`@sesamecare-oss/ai-templating` loads prompts and skills for Sesame services from:
+`@sesamecare-oss/ai-templating` loads prompts and skills for [Typescript services](/openapi-typescript-infra/service) from:
 
 - local files under `private/prompts` and `private/skills`
 - Langfuse prompts, partials, and skills

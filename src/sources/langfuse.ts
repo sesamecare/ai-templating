@@ -1,10 +1,13 @@
 import handlebars from 'handlebars';
-import type { LangfuseClient } from '@langfuse/client';
+import type { ChatPromptClient, LangfuseClient, TextPromptClient } from '@langfuse/client';
 import type { PromptMeta } from '@langfuse/core';
+import { asyncPool } from '@sesamecare-oss/async-pool';
 
 import type { TemplateApp, TemplatePartialSource, TemplateStore } from '../types.js';
 import { cacheTemplateVersion, createLangfuseTemplate, getVariantName } from '../template-store.js';
 import { normalize } from '../weighted-selector.js';
+
+const CONCURRENCY = 10;
 
 type PromptSummary = Pick<PromptMeta, 'name' | 'labels'>;
 
@@ -46,22 +49,22 @@ export async function loadLangfuseInventory(
 ) {
   const productionLabelsByName = new Map<string, string[]>();
 
-  for await (const prompt of iterateAllPrompts(langfuse)) {
+  await asyncPool(CONCURRENCY, iterateAllPrompts(langfuse), async (prompt) => {
     if (isPartialPrompt(prompt.name)) {
       await loadLangfusePartial(app, langfuse, partials, prompt);
-      continue;
+      return;
     }
 
     if (isSkillPrompt(prompt.name)) {
       await loadLangfuseSkill(app, langfuse, store, prompt);
-      continue;
+      return;
     }
 
     productionLabelsByName.set(
       prompt.name,
       prompt.labels.filter((label) => label.startsWith('production')),
     );
-  }
+  });
 
   return productionLabelsByName;
 }
@@ -72,17 +75,37 @@ export async function loadProductionTemplates(
   store: TemplateStore,
   labelsByName: Map<string, string[]>,
 ) {
+  // Flatten all (templateName, label) pairs so we can fetch them concurrently
+  const fetches: { templateName: string; label: string }[] = [];
   for (const [templateName, labels] of labelsByName.entries()) {
-    if (labels.length === 0) {
-      continue;
+    for (const label of labels) {
+      fetches.push({ templateName, label });
     }
+  }
 
-    if (labels.length === 1) {
-      const [label] = labels;
-      const promptDetail = await langfuse.prompt.get(templateName, {
-        label,
-        cacheTtlSeconds: 0,
-      });
+  // Fetch all prompt details concurrently
+  const results = new Map<
+    string,
+    { label: string; promptDetail: TextPromptClient | ChatPromptClient }[]
+  >();
+
+  await asyncPool(CONCURRENCY, toAsyncIterable(fetches), async ({ templateName, label }) => {
+    const promptDetail = await langfuse.prompt.get(templateName, {
+      label,
+      cacheTtlSeconds: 0,
+    });
+    let entries = results.get(templateName);
+    if (!entries) {
+      entries = [];
+      results.set(templateName, entries);
+    }
+    entries.push({ label, promptDetail });
+  });
+
+  // Now assemble templates from fetched results
+  for (const [templateName, entries] of results.entries()) {
+    if (entries.length === 1) {
+      const { label, promptDetail } = entries[0];
       const template = createLangfuseTemplate(templateName, promptDetail, label);
 
       store.templates[templateName] = template;
@@ -98,11 +121,7 @@ export async function loadProductionTemplates(
     }
 
     const variants = [];
-    for (const label of labels) {
-      const promptDetail = await langfuse.prompt.get(templateName, {
-        label,
-        cacheTtlSeconds: 0,
-      });
+    for (const { label, promptDetail } of entries) {
       const template = createLangfuseTemplate(templateName, promptDetail, label);
 
       variants.push({
@@ -222,6 +241,12 @@ async function loadLangfuseSkill(
     detail: handlebars.compile(promptDetail.prompt)({}),
     tools: parsedConfig.tools,
   };
+}
+
+async function* toAsyncIterable<T>(items: T[]): AsyncIterable<T> {
+  for (const item of items) {
+    yield item;
+  }
 }
 
 function parseSkillConfig(config: unknown): ParsedSkillConfig | string {
