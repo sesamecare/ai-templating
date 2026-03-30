@@ -49,6 +49,8 @@ export interface SkillSpec {
   description: string;
   detail: string;
   tools?: string[];
+  /** When true, this skill can be activated alongside other skills in the same turn. */
+  composable?: boolean;
 }
 
 export interface DevPrompt {
