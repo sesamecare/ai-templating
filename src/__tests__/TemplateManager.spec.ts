@@ -14,6 +14,9 @@ describe('TemplateManager.reloadFromLangfuse', () => {
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
+
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   test('refreshes one prompt without refetching unrelated prompt details', async () => {
@@ -69,6 +72,85 @@ describe('TemplateManager.reloadFromLangfuse', () => {
     expect(promptGetCalls).toContain('patient/base-prompt');
     expect(promptGetCalls).not.toContain('patient/other-prompt');
   });
+
+  test('retries transient Langfuse fetch failures during initial template load', async () => {
+    const rootDir = mkdtempSync(path.join(os.tmpdir(), 'ai-templating-'));
+    roots.push(rootDir);
+    mkdirSync(path.join(rootDir, 'prompts'), { recursive: true });
+    mkdirSync(path.join(rootDir, 'skills'), { recursive: true });
+
+    const app = createApp();
+    const langfuse = {
+      api: {
+        prompts: {
+          list: vi
+            .fn()
+            .mockRejectedValueOnce(new Error('fetch failed'))
+            .mockResolvedValue({ data: [] }),
+        },
+      },
+      prompt: {
+        get: vi.fn(),
+      },
+    } as unknown as LangfuseClient;
+
+    const manager = new TemplateManager(app, {
+      langfuse,
+      rootDir,
+    });
+
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(immediateSetTimeout);
+
+    await expect(manager.loadTemplates()).resolves.toBeUndefined();
+
+    expect(langfuse.api.prompts.list).toHaveBeenCalledTimes(2);
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(app.locals.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 1,
+        maxAttempts: 3,
+        retryDelayMs: 500,
+        errorMessage: 'fetch failed',
+      }),
+      'Template load failed; retrying',
+    );
+  });
+
+  test('fails hard after exhausting retries for transient Langfuse fetch failures', async () => {
+    const rootDir = mkdtempSync(path.join(os.tmpdir(), 'ai-templating-'));
+    roots.push(rootDir);
+    mkdirSync(path.join(rootDir, 'prompts'), { recursive: true });
+    mkdirSync(path.join(rootDir, 'skills'), { recursive: true });
+
+    const app = createApp();
+    const langfuse = {
+      api: {
+        prompts: {
+          list: vi.fn().mockRejectedValue(new Error('fetch failed')),
+        },
+      },
+      prompt: {
+        get: vi.fn(),
+      },
+    } as unknown as LangfuseClient;
+
+    const manager = new TemplateManager(app, {
+      langfuse,
+      rootDir,
+    });
+
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(immediateSetTimeout);
+
+    await expect(manager.loadTemplates()).rejects.toThrow('fetch failed');
+
+    expect(langfuse.api.prompts.list).toHaveBeenCalledTimes(3);
+    expect(app.locals.logger.warn).toHaveBeenCalledTimes(2);
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
+  });
 });
 
 function createPromptDetail(name: string, version: number, labels: string[]) {
@@ -86,6 +168,13 @@ function createPromptDetail(name: string, version: number, labels: string[]) {
     toJSON: () => JSON.stringify({ name, version }),
   };
 }
+
+const immediateSetTimeout: typeof setTimeout = ((callback: TimerHandler) => {
+  if (typeof callback === 'function') {
+    callback();
+  }
+  return 0 as never;
+}) as typeof setTimeout;
 
 function createApp() {
   return {
