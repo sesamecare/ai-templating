@@ -64,12 +64,12 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@apidevtools/json-schema-ref-parser": "^15.3.4",
+    "@apidevtools/json-schema-ref-parser": "^15.3.5",
     "@langfuse/client": "^5.0.1",
     "@langfuse/core": "^5.0.1",
     "@openapi-typescript-infra/service": "^6.13.0",
     "@sesamecare-oss/async-pool": "^1.0.5",
-    "ai": "^6.0.141",
+    "ai": "^6.0.142",
     "date-fns": "^4.1.0",
     "handlebars": "^4.7.9",
     "handlebars-helpers": "^0.10.0"
@@ -86,7 +86,7 @@
     "eslint-plugin-import": "^2.32.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2",
+    "typescript-eslint": "^8.58.0",
     "vitest": "^4.1.2"
   }
 }
