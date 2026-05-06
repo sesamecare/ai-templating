@@ -238,7 +238,7 @@ async function loadLangfuseSkill(
   store.skills[skillName] = {
     name: skillName,
     description: parsedConfig.description,
-    detail: handlebars.compile(promptDetail.prompt)({}),
+    detail: handlebars.compile(promptDetail.prompt, { noEscape: true })({}),
     tools: parsedConfig.tools,
   };
 }
