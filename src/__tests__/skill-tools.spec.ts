@@ -125,6 +125,9 @@ describe('normalizeSkillName', () => {
     expect(normalizeSkillName('skill/patient/handle_refill')).toBe('patient_handle_refill');
     expect(normalizeSkillName('skill:patient/handle_refill')).toBe('patient_handle_refill');
     expect(normalizeSkillName('patient_handle_refill')).toBe('patient_handle_refill');
+    // Matches getSkillNameFromFile's sanitization: \W+ collapses to one _.
+    expect(normalizeSkillName('support-agent/tickets')).toBe('support_agent_tickets');
+    expect(normalizeSkillName('skill/support-agent/tickets')).toBe('support_agent_tickets');
   });
 
   test('normalizeSkillNames filters non-strings and returns undefined for non-arrays', () => {

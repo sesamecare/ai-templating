@@ -4,7 +4,7 @@ import { asyncPool } from '@sesamecare-oss/async-pool';
 
 import type { SkillTools, TemplateApp, TemplatePartialSource, TemplateStore } from '../types.js';
 import { cacheTemplateVersion, createLangfuseTemplate, getVariantName } from '../template-store.js';
-import { validateSkillTools } from '../skill-tools.js';
+import { normalizeSkillName, validateSkillTools } from '../skill-tools.js';
 import { normalize } from '../weighted-selector.js';
 
 const CONCURRENCY = 10;
@@ -219,7 +219,7 @@ async function loadLangfuseSkill(
   store: TemplateStore,
   prompt: PromptSummary,
 ) {
-  const skillName = prompt.name.replace(/skill[:/]/, '').replace(/\//g, '_');
+  const skillName = normalizeSkillName(prompt.name);
   const promptDetail = await langfuse.prompt.get(prompt.name);
   if (!promptDetail) {
     return;

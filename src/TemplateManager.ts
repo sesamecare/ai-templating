@@ -23,6 +23,7 @@ import {
   loadFilesystemSkillByName,
   loadFilesystemTemplateByName,
 } from './sources/filesystem.js';
+import { normalizeSkillName } from './skill-tools.js';
 import {
   cacheTemplateVersion,
   createLangfuseTemplate,
@@ -265,7 +266,7 @@ export class TemplateManager implements TemplateStore {
 
   private async reloadSkillFromLangfuse(promptName: string, directories: TemplateDirectories) {
     const skillPath = promptName.replace(/skill[:/]/, '');
-    const skillName = skillPath.replace(/\//g, '_');
+    const skillName = normalizeSkillName(skillPath);
 
     delete this.skills[skillName];
 

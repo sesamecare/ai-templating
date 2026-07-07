@@ -133,12 +133,14 @@ export function validateSkillTools(tools: unknown): string | undefined {
 
 /**
  * Normalize a skill name to skill-store form: strips a `skill:`/`skill/`
- * prefix and converts path separators to underscores, so prompt configs can
- * reference skills by their file path (`patient/handle_refill`) or their
- * store name (`patient_handle_refill`) interchangeably.
+ * prefix and sanitizes the rest the same way as `getSkillNameFromFile`
+ * (`\W+` collapses to a single underscore), so prompt configs can reference
+ * skills by their file path (`patient/handle_refill`,
+ * `support-agent/tickets`) or their store name (`patient_handle_refill`,
+ * `support_agent_tickets`) interchangeably.
  */
 export function normalizeSkillName(name: string): string {
-  return name.replace(/^skill[:/]/, '').replace(/\//g, '_');
+  return name.replace(/^skill[:/]/, '').replace(/\W+/g, '_');
 }
 
 export function normalizeSkillNames(names: unknown): string[] | undefined {

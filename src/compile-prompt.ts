@@ -22,7 +22,7 @@ export function compileLangfusePrompt<T>(
 
       return {
         role: chatMessage.role as ModelMessage['role'],
-        template: handlebars.compile(chatMessage.content),
+        template: handlebars.compile(chatMessage.content, { noEscape: true }),
       };
     });
 
@@ -48,7 +48,7 @@ export function compileLangfusePrompt<T>(
     };
   }
 
-  const template = handlebars.compile(promptDetail.prompt);
+  const template = handlebars.compile(promptDetail.prompt, { noEscape: true });
   return (
     context: T,
     placeholders: Record<string, ModelMessage[]> | undefined,

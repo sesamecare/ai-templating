@@ -22,7 +22,7 @@ export function getPromptNameFromFile(rootDir: string, file: string) {
 }
 
 export function getSkillNameFromFile(rootDir: string, file: string) {
-  return getPromptNameFromFile(rootDir, file).replace(/\//g, '_');
+  return getPromptNameFromFile(rootDir, file).replace(/\W+/g, '_');
 }
 
 export function getPartialNameFromFile(rootDir: string, file: string) {
