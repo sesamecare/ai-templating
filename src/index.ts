@@ -7,6 +7,13 @@ export {
 } from './template-files.js';
 export { iterateAllPrompts } from './sources/langfuse.js';
 export {
+  normalizeSkillName,
+  normalizeSkillNames,
+  resolveSkillTools,
+  resolveSkillToolsForSpec,
+  validateSkillTools,
+} from './skill-tools.js';
+export {
   fnv1a32,
   normalize,
   parseWeights,
@@ -20,6 +27,9 @@ export type {
   LangfusePromptDetail,
   PromptVariant,
   SkillSpec,
+  SkillToolEntry,
+  SkillToolRule,
+  SkillTools,
   TemplateApp,
   TemplateConfig,
   TemplateDirectories,

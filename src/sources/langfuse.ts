@@ -1,10 +1,10 @@
-import handlebars from 'handlebars';
 import type { ChatPromptClient, LangfuseClient, TextPromptClient } from '@langfuse/client';
 import type { PromptMeta } from '@langfuse/core';
 import { asyncPool } from '@sesamecare-oss/async-pool';
 
-import type { TemplateApp, TemplatePartialSource, TemplateStore } from '../types.js';
+import type { SkillTools, TemplateApp, TemplatePartialSource, TemplateStore } from '../types.js';
 import { cacheTemplateVersion, createLangfuseTemplate, getVariantName } from '../template-store.js';
+import { normalizeSkillName, validateSkillTools } from '../skill-tools.js';
 import { normalize } from '../weighted-selector.js';
 
 const CONCURRENCY = 10;
@@ -13,7 +13,8 @@ type PromptSummary = Pick<PromptMeta, 'name' | 'labels'>;
 
 interface ParsedSkillConfig {
   description: string;
-  tools?: string[];
+  tools?: SkillTools;
+  composable?: boolean;
 }
 
 export async function* iterateAllPrompts(langfuse: LangfuseClient) {
@@ -218,7 +219,7 @@ async function loadLangfuseSkill(
   store: TemplateStore,
   prompt: PromptSummary,
 ) {
-  const skillName = prompt.name.replace(/skill[:/]/, '').replace(/\//g, '_');
+  const skillName = normalizeSkillName(prompt.name);
   const promptDetail = await langfuse.prompt.get(prompt.name);
   if (!promptDetail) {
     return;
@@ -238,8 +239,12 @@ async function loadLangfuseSkill(
   store.skills[skillName] = {
     name: skillName,
     description: parsedConfig.description,
-    detail: handlebars.compile(promptDetail.prompt, { noEscape: true })({}),
+    // Keep the raw template: skill detail is rendered by the consumer with
+    // the live conversation context (flow, options, ...), so a single skill
+    // can vary its instructions by the prompt/flow that hosts it.
+    detail: promptDetail.prompt,
     tools: parsedConfig.tools,
+    ...(parsedConfig.composable ? { composable: true } : {}),
   };
 }
 
@@ -256,13 +261,15 @@ function parseSkillConfig(config: unknown): ParsedSkillConfig | string {
   }
 
   const tools = (config as { tools?: unknown } | undefined)?.tools;
-  if (tools !== undefined && !Array.isArray(tools)) {
-    return 'Skill prompt has invalid tool list - must be array or undefined';
+  const toolsError = validateSkillTools(tools);
+  if (toolsError) {
+    return `Skill prompt has invalid tools: ${toolsError}`;
   }
 
   return {
     description,
-    tools: tools?.filter((tool): tool is string => typeof tool === 'string'),
+    tools: tools as SkillTools | undefined,
+    composable: (config as { composable?: unknown } | undefined)?.composable === true,
   };
 }
 
