@@ -16,6 +16,7 @@ import {
   getSkillNameFromFile,
 } from '../template-files.js';
 import { createDevTemplate } from '../template-store.js';
+import { normalizeSkillNames, validateSkillTools } from '../skill-tools.js';
 
 export async function loadFilesystemPartials(promptsDir: string) {
   const partials = new Map<string, TemplatePartialSource>();
@@ -97,6 +98,7 @@ export async function loadFilesystemSkills(
   for await (const file of files) {
     const skill = await derefTemplateFile<Omit<SkillSpec, 'name'>>(file);
     const skillName = getSkillNameFromFile(skillsDir, file);
+    assertValidSkillTools(skillName, file, skill);
     store.skills[skillName] = { ...skill, name: skillName };
 
     if (process.env.DEBUG_TEMPLATES) {
@@ -118,6 +120,7 @@ export async function loadFilesystemSkillByName(
 
   const skill = await derefTemplateFile<Omit<SkillSpec, 'name'>>(file);
   const skillName = getSkillNameFromFile(skillsDir, file);
+  assertValidSkillTools(skillName, file, skill);
   store.skills[skillName] = { ...skill, name: skillName };
 
   if (process.env.DEBUG_TEMPLATES) {
@@ -125,6 +128,32 @@ export async function loadFilesystemSkillByName(
   }
 
   return true;
+}
+
+function assertValidSkillTools(skillName: string, file: string, skill: Omit<SkillSpec, 'name'>) {
+  const toolsError = validateSkillTools(skill.tools);
+  if (toolsError) {
+    throw new Error(`Skill ${skillName} (${file}) has invalid tools: ${toolsError}`);
+  }
+}
+
+/**
+ * Read just the top-level `skills` binding from a filesystem prompt yaml,
+ * without touching the template store. Returns undefined when the file does
+ * not exist or declares no skills. Used as the fallback binding when a
+ * Langfuse-sourced prompt does not declare `config.skills`.
+ */
+export async function loadFilesystemPromptSkills(
+  promptsDir: string,
+  templateName: string,
+): Promise<string[] | undefined> {
+  const file = resolveYamlFile(promptsDir, templateName);
+  if (!file) {
+    return undefined;
+  }
+
+  const prompt = await derefTemplateFile<DevPrompt>(file);
+  return normalizeSkillNames(prompt.skills);
 }
 
 function resolveYamlFile(rootDir: string, relativeName: string) {

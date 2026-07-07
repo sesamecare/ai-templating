@@ -1,6 +1,7 @@
 import type { ChatPromptClient, TextPromptClient } from '@langfuse/client';
 
 import { compileLangfusePrompt } from './compile-prompt.js';
+import { normalizeSkillNames } from './skill-tools.js';
 import type { WeightedItem } from './weighted-selector.js';
 import { normalize, weightedPick } from './weighted-selector.js';
 import type {
@@ -21,6 +22,9 @@ export function createDevTemplate<T>(
     variant: getVariantName(templateName),
     version: -1,
     config: prompt.config,
+    skills: normalizeSkillNames(
+      prompt.skills ?? (prompt.config as { skills?: unknown } | undefined)?.skills,
+    ),
     tag: JSON.stringify({ version: 'dev', name: templateName }),
     delegate: compileLangfusePrompt({ type: 'chat', prompt: prompt.messages }),
   };
@@ -41,6 +45,7 @@ export function createLangfuseTemplate<T>(
     version: normalizedPrompt.version,
     tag: normalizedPrompt.toJSON(),
     config: normalizedPrompt.config as TemplateConfig | undefined,
+    skills: normalizeSkillNames((normalizedPrompt.config as { skills?: unknown })?.skills),
     delegate: compileLangfusePrompt(normalizedPrompt),
   };
 }

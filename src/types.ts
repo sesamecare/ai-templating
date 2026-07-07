@@ -19,6 +19,13 @@ export interface LangfuseHandlebarsTemplate<T = unknown> {
   variant: string;
   tag: string;
   config?: TemplateConfig;
+  /**
+   * Names of the skills bound to this prompt. Populated from the top-level
+   * `skills` list in a filesystem prompt yaml, or from `config.skills` on a
+   * Langfuse prompt. Names are normalized to skill-store form
+   * (`patient/handle_refill` → `patient_handle_refill`).
+   */
+  skills?: string[];
   delegate: LangfuseTemplateDelegate<T>;
 }
 
@@ -44,11 +51,35 @@ export type LangfusePromptDetail =
   | RefinedPromptDetail<TextPromptClient, 'text', string>
   | RefinedPromptDetail<ChatPromptClient, 'chat', ChatMessageWithPlaceholders[]>;
 
+/**
+ * A conditional tool entry. `include` and `exclude` are
+ * @sesamecare-oss/rule-evaluator expressions evaluated against the same
+ * context used to render the skill detail (which always includes the
+ * top-level `flow`):
+ *
+ * - `include`: the tool is bound only when the rule evaluates truthy
+ * - `exclude`: the tool is dropped when the rule evaluates truthy, even if
+ *   another entry included it — exclusion wins
+ *
+ * An entry with neither rule always applies. A bare string is shorthand for
+ * `{ name }`.
+ */
+export interface SkillToolRule {
+  name: string;
+  include?: string;
+  exclude?: string;
+}
+
+export type SkillToolEntry = string | SkillToolRule;
+
+/** A skill's tool binding: a list of unconditional and/or rule-based entries. */
+export type SkillTools = SkillToolEntry[];
+
 export interface SkillSpec {
   name: string;
   description: string;
   detail: string;
-  tools?: string[];
+  tools?: SkillTools;
   /** When true, this skill can be activated alongside other skills in the same turn. */
   composable?: boolean;
 }
@@ -56,6 +87,8 @@ export interface SkillSpec {
 export interface DevPrompt {
   messages: ChatMessageWithPlaceholders[];
   config?: TemplateConfig;
+  /** Skills bound to this prompt (see LangfuseHandlebarsTemplate.skills). */
+  skills?: string[];
 }
 
 export interface TemplateStore {
