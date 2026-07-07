@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type {
   DevPrompt,
+  RuleGatedName,
   SkillSpec,
   TemplateApp,
   TemplatePartialSource,
@@ -16,7 +17,7 @@ import {
   getSkillNameFromFile,
 } from '../template-files.js';
 import { createDevTemplate } from '../template-store.js';
-import { normalizeSkillNames, validateSkillTools } from '../skill-tools.js';
+import { normalizeSkillNames, validateRuleGatedNames, validateSkillTools } from '../skill-tools.js';
 
 export async function loadFilesystemPartials(promptsDir: string) {
   const partials = new Map<string, TemplatePartialSource>();
@@ -59,6 +60,7 @@ export async function loadFilesystemTemplates(
   for await (const file of files) {
     const prompt = await derefTemplateFile<DevPrompt>(file);
     const templateName = getPromptNameFromFile(promptsDir, file);
+    assertValidPromptSkills(templateName, file, prompt);
     store.templates[templateName] = createDevTemplate(templateName, prompt);
 
     if (process.env.DEBUG_TEMPLATES) {
@@ -79,6 +81,7 @@ export async function loadFilesystemTemplateByName(
   }
 
   const prompt = await derefTemplateFile<DevPrompt>(file);
+  assertValidPromptSkills(templateName, file, prompt);
   store.templates[templateName] = createDevTemplate(templateName, prompt);
 
   if (process.env.DEBUG_TEMPLATES) {
@@ -137,6 +140,18 @@ function assertValidSkillTools(skillName: string, file: string, skill: Omit<Skil
   }
 }
 
+function assertValidPromptSkills(templateName: string, file: string, prompt: DevPrompt) {
+  const skillsError = validateRuleGatedNames(
+    prompt.skills ?? (prompt.config as { skills?: unknown } | undefined)?.skills,
+    'skills',
+  );
+  if (skillsError) {
+    throw new Error(
+      `Prompt ${templateName} (${file}) has an invalid skills binding: ${skillsError}`,
+    );
+  }
+}
+
 /**
  * Read just the top-level `skills` binding from a filesystem prompt yaml,
  * without touching the template store. Returns undefined when the file does
@@ -146,7 +161,7 @@ function assertValidSkillTools(skillName: string, file: string, skill: Omit<Skil
 export async function loadFilesystemPromptSkills(
   promptsDir: string,
   templateName: string,
-): Promise<string[] | undefined> {
+): Promise<RuleGatedName[] | undefined> {
   const file = resolveYamlFile(promptsDir, templateName);
   if (!file) {
     return undefined;

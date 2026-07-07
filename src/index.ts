@@ -7,10 +7,13 @@ export {
 } from './template-files.js';
 export { iterateAllPrompts } from './sources/langfuse.js';
 export {
+  hasRuleGatedEntries,
   normalizeSkillName,
   normalizeSkillNames,
+  resolveRuleGatedNames,
   resolveSkillTools,
   resolveSkillToolsForSpec,
+  validateRuleGatedNames,
   validateSkillTools,
 } from './skill-tools.js';
 export {
@@ -26,9 +29,10 @@ export type {
   LangfuseHandlebarsTemplate,
   LangfusePromptDetail,
   PromptVariant,
+  RuleContext,
+  RuleGatedEntry,
+  RuleGatedName,
   SkillSpec,
-  SkillToolEntry,
-  SkillToolRule,
   SkillTools,
   TemplateApp,
   TemplateConfig,
