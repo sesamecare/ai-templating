@@ -1,6 +1,6 @@
 import { toFunction } from '@sesamecare-oss/rule-evaluator';
 
-import type { SkillSpec, SkillToolEntry, SkillToolRule, SkillTools } from './types.js';
+import type { RuleContext, RuleGatedEntry, RuleGatedName, SkillSpec, SkillTools } from './types.js';
 
 type CompiledRule = ReturnType<typeof toFunction>;
 
@@ -17,36 +17,44 @@ function compileRule(expression: string): CompiledRule {
   return compiled;
 }
 
-function normalizeEntry(entry: SkillToolEntry): SkillToolRule {
+function normalizeEntry(entry: RuleGatedName): RuleGatedEntry {
   return typeof entry === 'string' ? { name: entry } : entry;
 }
 
-function evaluateRule(expression: string, context: Record<string, unknown>): boolean {
+function evaluateRule(expression: string, context: RuleContext): boolean {
   return Boolean(compileRule(expression)(context));
 }
 
+/** True when any entry in the list carries an include/exclude rule. */
+export function hasRuleGatedEntries(entries: readonly RuleGatedName[] | undefined): boolean {
+  return Boolean(
+    entries?.some((entry) => typeof entry !== 'string' && (entry.include || entry.exclude)),
+  );
+}
+
 /**
- * Resolve a skill's tool binding against a rendering context.
+ * Resolve a list of rule-gated name entries against a context.
  *
  * Each entry is included when it has no `include` rule or its `include` rule
  * evaluates truthy. Any entry whose `exclude` rule evaluates truthy then
- * removes that tool from the result, even if another entry included it —
+ * removes that name from the result, even if another entry included it —
  * exclusion wins. Rules are @sesamecare-oss/rule-evaluator expressions
- * evaluated against `context`, which should be the same context used to
- * render the skill detail (and always carries the top-level `flow`).
+ * evaluated against `context`, which always carries the top-level `flow`.
+ *
+ * Used for both skill→tool bindings and prompt→skill bindings.
  */
-export function resolveSkillTools(
-  tools: SkillTools | undefined,
-  context: Record<string, unknown>,
+export function resolveRuleGatedNames(
+  entries: readonly RuleGatedName[] | undefined,
+  context: RuleContext,
 ): string[] {
-  if (!tools) {
+  if (!entries) {
     return [];
   }
 
-  const entries = tools.map(normalizeEntry);
+  const normalized = entries.map(normalizeEntry);
 
   const included: string[] = [];
-  for (const entry of entries) {
+  for (const entry of normalized) {
     if (included.includes(entry.name)) {
       continue;
     }
@@ -56,7 +64,7 @@ export function resolveSkillTools(
   }
 
   const excluded = new Set(
-    entries
+    normalized
       .filter((entry) => entry.exclude && evaluateRule(entry.exclude, context))
       .map((entry) => entry.name),
   );
@@ -65,36 +73,44 @@ export function resolveSkillTools(
 }
 
 /**
+ * Resolve a skill's tool binding against the rendering context. See
+ * {@link resolveRuleGatedNames} for the semantics.
+ */
+export function resolveSkillTools(tools: SkillTools | undefined, context: RuleContext): string[] {
+  return resolveRuleGatedNames(tools, context);
+}
+
+/**
  * Convenience wrapper over {@link resolveSkillTools} for a full spec.
  */
 export function resolveSkillToolsForSpec(
   spec: Pick<SkillSpec, 'tools'>,
-  context: Record<string, unknown>,
+  context: RuleContext,
 ): string[] {
   return resolveSkillTools(spec.tools, context);
 }
 
 /**
- * Validate a tools binding: checks the structural shape and eagerly compiles
- * every `include`/`exclude` expression so malformed rules fail at load time
- * rather than mid-conversation. Returns an error message, or undefined when
- * valid.
+ * Validate a list of rule-gated name entries: checks the structural shape
+ * and eagerly compiles every `include`/`exclude` expression so malformed
+ * rules fail at load time rather than mid-conversation. Returns an error
+ * message, or undefined when valid.
  */
-export function validateSkillTools(tools: unknown): string | undefined {
-  if (tools === undefined) {
+export function validateRuleGatedNames(entries: unknown, label = 'entries'): string | undefined {
+  if (entries === undefined) {
     return undefined;
   }
 
-  if (!Array.isArray(tools)) {
-    return 'tools must be an array of tool names or { name, include?, exclude? } entries';
+  if (!Array.isArray(entries)) {
+    return `${label} must be an array of names or { name, include?, exclude? } entries`;
   }
 
-  for (const entry of tools) {
+  for (const entry of entries) {
     if (typeof entry === 'string') {
       continue;
     }
     if (typeof entry !== 'object' || entry === null) {
-      return 'tools entries must be strings or { name, include?, exclude? } objects';
+      return `${label} entries must be strings or { name, include?, exclude? } objects`;
     }
 
     const record = entry as Record<string, unknown>;
@@ -102,12 +118,12 @@ export function validateSkillTools(tools: unknown): string | undefined {
       (key) => key !== 'name' && key !== 'include' && key !== 'exclude',
     );
     if (unknownKeys.length > 0) {
-      return `tools entry has unknown keys: ${unknownKeys.join(', ')}`;
+      return `${label} entry has unknown keys: ${unknownKeys.join(', ')}`;
     }
 
     const { name } = record;
     if (typeof name !== 'string' || !name) {
-      return 'tools entry is missing a name';
+      return `${label} entry is missing a name`;
     }
 
     for (const key of ['include', 'exclude'] as const) {
@@ -116,12 +132,12 @@ export function validateSkillTools(tools: unknown): string | undefined {
         continue;
       }
       if (typeof rule !== 'string') {
-        return `tools entry '${name}' has a non-string ${key} rule`;
+        return `${label} entry '${name}' has a non-string ${key} rule`;
       }
       try {
         compileRule(rule);
       } catch (error) {
-        return `tools entry '${name}' has an invalid ${key} rule: ${
+        return `${label} entry '${name}' has an invalid ${key} rule: ${
           error instanceof Error ? error.message : String(error)
         }`;
       }
@@ -129,6 +145,11 @@ export function validateSkillTools(tools: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+/** Validate a skill's tool binding. See {@link validateRuleGatedNames}. */
+export function validateSkillTools(tools: unknown): string | undefined {
+  return validateRuleGatedNames(tools, 'tools');
 }
 
 /**
@@ -143,12 +164,29 @@ export function normalizeSkillName(name: string): string {
   return name.replace(/^skill[:/]/, '').replace(/\W+/g, '_');
 }
 
-export function normalizeSkillNames(names: unknown): string[] | undefined {
-  if (!Array.isArray(names)) {
+/**
+ * Normalize a prompt's skills binding: keeps plain-name and rule-gated
+ * entries, normalizing each name to skill-store form. Returns undefined for
+ * non-arrays (no binding declared).
+ */
+export function normalizeSkillNames(entries: unknown): RuleGatedName[] | undefined {
+  if (!Array.isArray(entries)) {
     return undefined;
   }
-  const normalized = names
-    .filter((name): name is string => typeof name === 'string' && name.length > 0)
-    .map(normalizeSkillName);
+
+  const normalized: RuleGatedName[] = [];
+  for (const entry of entries) {
+    if (typeof entry === 'string' && entry.length > 0) {
+      normalized.push(normalizeSkillName(entry));
+    } else if (
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as { name?: unknown }).name === 'string' &&
+      (entry as { name: string }).name.length > 0
+    ) {
+      const gated = entry as RuleGatedEntry;
+      normalized.push({ ...gated, name: normalizeSkillName(gated.name) });
+    }
+  }
   return normalized;
 }

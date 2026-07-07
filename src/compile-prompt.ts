@@ -8,8 +8,7 @@ import type { LangfuseTemplateDelegate } from './types.js';
 
 export function compileLangfusePrompt<T>(
   promptDetail:
-    | Pick<TextPromptClient, 'type' | 'prompt'>
-    | Pick<ChatPromptClient, 'prompt' | 'type'>,
+    Pick<TextPromptClient, 'type' | 'prompt'> | Pick<ChatPromptClient, 'prompt' | 'type'>,
 ): LangfuseTemplateDelegate<T> {
   if (promptDetail.type === 'chat') {
     const promptMessages = promptDetail.prompt as ChatPromptClient['prompt'];

@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  hasRuleGatedEntries,
   normalizeSkillName,
   normalizeSkillNames,
+  resolveRuleGatedNames,
   resolveSkillTools,
   validateSkillTools,
 } from '../skill-tools.js';
@@ -34,10 +36,7 @@ describe('resolveSkillTools', () => {
   });
 
   test('an exclude rule drops the tool only when it fires', () => {
-    const tools = [
-      'request_location',
-      { name: 'alert', exclude: 'flow == "customer-support"' },
-    ];
+    const tools = ['request_location', { name: 'alert', exclude: 'flow == "customer-support"' }];
 
     expect(resolveSkillTools(tools, { flow: 'customer-support' })).toEqual(['request_location']);
     expect(resolveSkillTools(tools, { flow: 'patient-generic' })).toEqual([
@@ -82,7 +81,35 @@ describe('resolveSkillTools', () => {
   });
 
   test('deduplicates repeated entries', () => {
-    expect(resolveSkillTools(['a', 'a', { name: 'a' }], {})).toEqual(['a']);
+    expect(resolveSkillTools(['a', 'a', { name: 'a' }], { flow: 'patient-generic' })).toEqual([
+      'a',
+    ]);
+  });
+});
+
+describe('resolveRuleGatedNames / hasRuleGatedEntries', () => {
+  test('resolves prompt skill bindings with the same semantics as tools', () => {
+    const entries = [
+      'patient_handle_symptoms',
+      { name: 'patient_handle_glp1', include: 'flow == "patient-generic"' },
+      { name: 'patient_handle_labs', exclude: 'options.labs_disabled == 1' },
+    ];
+
+    expect(resolveRuleGatedNames(entries, { flow: 'patient-generic', options: {} })).toEqual([
+      'patient_handle_symptoms',
+      'patient_handle_glp1',
+      'patient_handle_labs',
+    ]);
+    expect(
+      resolveRuleGatedNames(entries, { flow: 'support-agent', options: { labs_disabled: 1 } }),
+    ).toEqual(['patient_handle_symptoms']);
+  });
+
+  test('hasRuleGatedEntries detects rules', () => {
+    expect(hasRuleGatedEntries(undefined)).toBe(false);
+    expect(hasRuleGatedEntries(['a', { name: 'b' }])).toBe(false);
+    expect(hasRuleGatedEntries(['a', { name: 'b', include: 'flow == "x"' }])).toBe(true);
+    expect(hasRuleGatedEntries([{ name: 'b', exclude: 'flow == "x"' }])).toBe(true);
   });
 });
 
@@ -110,12 +137,8 @@ describe('validateSkillTools', () => {
   });
 
   test('rejects rules that fail to compile', () => {
-    expect(validateSkillTools([{ name: 'a', include: 'flow ==' }])).toMatch(
-      /invalid include rule/,
-    );
-    expect(validateSkillTools([{ name: 'a', exclude: 'and and' }])).toMatch(
-      /invalid exclude rule/,
-    );
+    expect(validateSkillTools([{ name: 'a', include: 'flow ==' }])).toMatch(/invalid include rule/);
+    expect(validateSkillTools([{ name: 'a', exclude: 'and and' }])).toMatch(/invalid exclude rule/);
   });
 });
 

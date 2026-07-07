@@ -203,7 +203,13 @@ describe('TemplateManager.getPromptSkills', () => {
       api: {
         prompts: {
           list: vi.fn(async ({ page }: { page: number }) => ({
-            data: page === 1 ? Object.keys(promptDetails).map((name) => ({ name, labels: promptDetails[name].labels })) : [],
+            data:
+              page === 1
+                ? Object.keys(promptDetails).map((name) => ({
+                    name,
+                    labels: promptDetails[name].labels,
+                  }))
+                : [],
           })),
         },
       },
@@ -258,11 +264,81 @@ describe('TemplateManager.getPromptSkills', () => {
     await expect(manager.getPromptSkills('patient/base-prompt')).resolves.toEqual([]);
   });
 
+  test('resolves rule-gated skills bindings against the provided context', async () => {
+    const rootDir = createFixtureRoot();
+    writeFileSync(
+      path.join(rootDir, 'skills', 'patient', 'refill.yaml'),
+      ['description: Handle refills.', 'detail: Refill instructions.', ''].join('\n'),
+    );
+    writeFileSync(
+      path.join(rootDir, 'prompts', 'patient', 'base-prompt.yaml'),
+      [
+        'skills:',
+        '  - patient/triage',
+        '  - name: patient/refill',
+        '    include: flow == "patient-generic"',
+        'messages:',
+        '  - role: system',
+        '    content: Test',
+        '',
+      ].join('\n'),
+    );
+    const manager = new TemplateManager(createApp(), {
+      langfuse: createLangfuse({}),
+      rootDir,
+    });
+    await manager.loadTemplates();
+
+    const patientSkills = await manager.getPromptSkills('patient/base-prompt', {
+      context: { flow: 'patient-generic' },
+    });
+    expect(patientSkills.map((skill) => skill.name)).toEqual(['patient_triage', 'patient_refill']);
+
+    const supportSkills = await manager.getPromptSkills('patient/base-prompt', {
+      context: { flow: 'support-agent' },
+    });
+    expect(supportSkills.map((skill) => skill.name)).toEqual(['patient_triage']);
+
+    // Rule-gated bindings must never silently no-op: no context is an error.
+    await expect(manager.getPromptSkills('patient/base-prompt')).rejects.toThrow(
+      'requires options.context',
+    );
+  });
+
+  test('rejects prompts with malformed skills bindings at load time', async () => {
+    const rootDir = createFixtureRoot();
+    writeFileSync(
+      path.join(rootDir, 'prompts', 'patient', 'base-prompt.yaml'),
+      [
+        'skills:',
+        '  - name: patient/triage',
+        '    include: flow ==',
+        'messages:',
+        '  - role: system',
+        '    content: Test',
+        '',
+      ].join('\n'),
+    );
+    const manager = new TemplateManager(createApp(), {
+      langfuse: createLangfuse({}),
+      rootDir,
+    });
+
+    await expect(manager.loadTemplates()).rejects.toThrow(/invalid skills binding/);
+  });
+
   test('throws when a bound skill does not exist', async () => {
     const rootDir = createFixtureRoot();
     writeFileSync(
       path.join(rootDir, 'prompts', 'patient', 'base-prompt.yaml'),
-      ['skills:', '  - patient/missing', 'messages:', '  - role: system', '    content: Test', ''].join('\n'),
+      [
+        'skills:',
+        '  - patient/missing',
+        'messages:',
+        '  - role: system',
+        '    content: Test',
+        '',
+      ].join('\n'),
     );
     const manager = new TemplateManager(createApp(), {
       langfuse: createLangfuse({}),

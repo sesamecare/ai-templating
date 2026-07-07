@@ -23,7 +23,7 @@ import {
   loadFilesystemSkillByName,
   loadFilesystemTemplateByName,
 } from './sources/filesystem.js';
-import { normalizeSkillName } from './skill-tools.js';
+import { hasRuleGatedEntries, normalizeSkillName, resolveRuleGatedNames } from './skill-tools.js';
 import {
   cacheTemplateVersion,
   createLangfuseTemplate,
@@ -34,6 +34,8 @@ import {
 import type {
   LangfuseReloadRequest,
   LangfuseHandlebarsTemplate,
+  RuleContext,
+  RuleGatedName,
   SkillSpec,
   TemplateApp,
   TemplateDirectories,
@@ -49,7 +51,7 @@ export class TemplateManager implements TemplateStore {
   // Fallback prompt→skills bindings read from filesystem prompt yamls, keyed
   // by base template name. Used when a Langfuse-sourced prompt does not
   // declare config.skills.
-  private readonly filesystemPromptSkills = new Map<string, string[] | undefined>();
+  private readonly filesystemPromptSkills = new Map<string, RuleGatedName[] | undefined>();
 
   constructor(
     private readonly app: TemplateApp,
@@ -88,6 +90,10 @@ export class TemplateManager implements TemplateStore {
    * unbind its skills. An explicit empty `config.skills` list disables the
    * fallback.
    *
+   * Binding entries may be rule-gated (`{ name, include?, exclude? }`); rules
+   * are evaluated against `options.context`, which is required when any
+   * entry carries a rule so gating can never silently no-op.
+   *
    * Pass the same `conversationUuid` you will pass to {@link render} so that
    * weighted prompt groups resolve to the same variant in both calls.
    */
@@ -96,11 +102,25 @@ export class TemplateManager implements TemplateStore {
     options?: {
       promptVersion?: number;
       conversationUuid?: string;
+      context?: RuleContext;
     },
   ): Promise<SkillSpec[]> {
     const templateInfo = await this.resolveTemplate(templateName, options);
-    const skillNames = templateInfo.skills ?? (await this.getFilesystemPromptSkills(templateName));
-    return this.getSkills(skillNames ?? []);
+    const entries = templateInfo.skills ?? (await this.getFilesystemPromptSkills(templateName));
+    if (!entries?.length) {
+      return [];
+    }
+
+    if (hasRuleGatedEntries(entries) && !options?.context) {
+      throw new ServiceError(
+        this.app,
+        `Prompt ${templateName} has rule-gated skills; getPromptSkills requires options.context`,
+        { status: 500 },
+      );
+    }
+
+    const skillNames = resolveRuleGatedNames(entries, options?.context ?? { flow: '' });
+    return this.getSkills(skillNames);
   }
 
   private async getFilesystemPromptSkills(templateName: string) {

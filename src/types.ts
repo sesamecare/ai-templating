@@ -20,12 +20,13 @@ export interface LangfuseHandlebarsTemplate<T = unknown> {
   tag: string;
   config?: TemplateConfig;
   /**
-   * Names of the skills bound to this prompt. Populated from the top-level
-   * `skills` list in a filesystem prompt yaml, or from `config.skills` on a
-   * Langfuse prompt. Names are normalized to skill-store form
-   * (`patient/handle_refill` → `patient_handle_refill`).
+   * Skills bound to this prompt. Populated from the top-level `skills` list
+   * in a filesystem prompt yaml, or from `config.skills` on a Langfuse
+   * prompt. Entries may be plain names or rule-gated
+   * (`{ name, include?, exclude? }`); names are normalized to skill-store
+   * form (`patient/handle_refill` → `patient_handle_refill`).
    */
-  skills?: string[];
+  skills?: RuleGatedName[];
   delegate: LangfuseTemplateDelegate<T>;
 }
 
@@ -52,28 +53,41 @@ export type LangfusePromptDetail =
   | RefinedPromptDetail<ChatPromptClient, 'chat', ChatMessageWithPlaceholders[]>;
 
 /**
- * A conditional tool entry. `include` and `exclude` are
- * @sesamecare-oss/rule-evaluator expressions evaluated against the same
- * context used to render the skill detail (which always includes the
- * top-level `flow`):
+ * The context that include/exclude rules evaluate against and that skill
+ * detail templates render with. `flow` (the active prompt/flow, e.g. a
+ * conversation type) is the required discriminator shared skills key off;
+ * everything else is caller-defined.
+ */
+export type RuleContext = { flow: string } & Record<string, unknown>;
+
+/**
+ * A conditional name entry, used by both skill→tool bindings and
+ * prompt→skill bindings. `include` and `exclude` are
+ * @sesamecare-oss/rule-evaluator expressions evaluated against the
+ * {@link RuleContext} (the same context used to render the skill detail):
  *
- * - `include`: the tool is bound only when the rule evaluates truthy
- * - `exclude`: the tool is dropped when the rule evaluates truthy, even if
+ * - `include`: the entry is bound only when the rule evaluates truthy
+ * - `exclude`: the entry is dropped when the rule evaluates truthy, even if
  *   another entry included it — exclusion wins
  *
  * An entry with neither rule always applies. A bare string is shorthand for
  * `{ name }`.
  */
-export interface SkillToolRule {
+export interface RuleGatedEntry {
   name: string;
   include?: string;
   exclude?: string;
 }
 
-export type SkillToolEntry = string | SkillToolRule;
+export type RuleGatedName = string | RuleGatedEntry;
+
+/** @deprecated Use {@link RuleGatedEntry}. */
+export type SkillToolRule = RuleGatedEntry;
+/** @deprecated Use {@link RuleGatedName}. */
+export type SkillToolEntry = RuleGatedName;
 
 /** A skill's tool binding: a list of unconditional and/or rule-based entries. */
-export type SkillTools = SkillToolEntry[];
+export type SkillTools = RuleGatedName[];
 
 export interface SkillSpec {
   name: string;
@@ -88,7 +102,7 @@ export interface DevPrompt {
   messages: ChatMessageWithPlaceholders[];
   config?: TemplateConfig;
   /** Skills bound to this prompt (see LangfuseHandlebarsTemplate.skills). */
-  skills?: string[];
+  skills?: RuleGatedName[];
 }
 
 export interface TemplateStore {

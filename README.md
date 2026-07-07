@@ -188,6 +188,10 @@ import { resolveSkillTools } from '@sesamecare-oss/ai-templating';
 const tools = resolveSkillTools(skill.tools, { flow: 'patient-generic' });
 ```
 
+The context is a `RuleContext` — `{ flow: string } & Record<string, unknown>`:
+`flow` (the active prompt/flow) is required as the shared-skill discriminator;
+everything else is caller-defined.
+
 ## Binding Skills to Prompts
 
 A prompt yaml may declare the skills that should be active for conversations
@@ -204,12 +208,25 @@ messages:
       $ref: ./base-prompt.hbs
 ```
 
+Skill entries support the same `include`/`exclude` rules as tool bindings, so
+one prompt config can gate skills by context:
+
+```yaml
+skills:
+  - patient/triage
+  - name: patient/refill
+    include: flow == "patient-generic"
+```
+
 Resolve them with `getPromptSkills`, passing the same `conversationUuid` you
-pass to `render` so weighted variants agree:
+pass to `render` so weighted variants agree. When any entry carries a rule,
+`options.context` (a `RuleContext`) is required — a missing context throws
+rather than silently resolving rules against nothing:
 
 ```ts
 const skills = await app.locals.templates.getPromptSkills('patient/base-prompt', {
   conversationUuid,
+  context: { flow: 'patient-generic', options },
 });
 ```
 
@@ -293,7 +310,8 @@ prompt yaml, `config.skills` in Langfuse). Accepts the same options as
 ### `resolveSkillTools(tools, context)`
 
 Resolves a skill's tool binding (tool names and/or rule entries) against a
-rendering context.
+rendering context (`RuleContext`). The generic form, `resolveRuleGatedNames`,
+resolves any `RuleGatedName[]` — it also powers prompt→skill bindings.
 
 ### `await templates.getAndCacheTemplate(name, version?, label?)`
 
