@@ -33,8 +33,6 @@ export type {
   RuleGatedEntry,
   RuleGatedName,
   SkillSpec,
-  SkillToolEntry,
-  SkillToolRule,
   SkillTools,
   TemplateApp,
   TemplateConfig,

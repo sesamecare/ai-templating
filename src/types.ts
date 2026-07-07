@@ -81,11 +81,6 @@ export interface RuleGatedEntry {
 
 export type RuleGatedName = string | RuleGatedEntry;
 
-/** @deprecated Use {@link RuleGatedEntry}. */
-export type SkillToolRule = RuleGatedEntry;
-/** @deprecated Use {@link RuleGatedName}. */
-export type SkillToolEntry = RuleGatedName;
-
 /** A skill's tool binding: a list of unconditional and/or rule-based entries. */
 export type SkillTools = RuleGatedName[];
 
