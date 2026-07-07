@@ -156,6 +156,63 @@ Load skills by name:
 const [triageSkill] = app.locals.templates.getSkills(['patient_triage']);
 ```
 
+### Conditional tool binding
+
+Instead of a plain list, `tools` may be an `include`/`exclude` object whose
+entries carry optional `when` rules. Rules are
+[`@sesamecare-oss/rule-evaluator`](https://github.com/sesamecare/rule-evaluator)
+expressions evaluated against the same context used to render the skill detail
+(the consumer should always provide the active `flow` at the top level). This
+lets one skill be shared by several prompts/flows while exposing different
+tools to each:
+
+```yaml
+description: Everything about prescriptions at Sesame.
+tools:
+  include:
+    - request_location
+    - name: suggest_providers_for_service
+      when: flow == "patient-generic"
+    - name: create_support_ticket
+      when: flow == "support-agent"
+  exclude:
+    - name: alert
+      when: flow == "customer-support"
+```
+
+`exclude` always wins over `include`. Resolve the binding with:
+
+```ts
+import { resolveSkillTools } from '@sesamecare-oss/ai-templating';
+
+const tools = resolveSkillTools(skill.tools, { flow: 'patient-generic' });
+```
+
+## Binding Skills to Prompts
+
+A prompt yaml may declare the skills that should be active for conversations
+using that prompt with a top-level `skills` list (Langfuse prompts use
+`config.skills`). Names may be given in path form (`patient/triage`) or store
+form (`patient_triage`):
+
+```yaml
+skills:
+  - patient/triage
+messages:
+  - role: system
+    content:
+      $ref: ./base-prompt.hbs
+```
+
+Resolve them with `getPromptSkills`, passing the same `conversationUuid` you
+pass to `render` so weighted variants agree:
+
+```ts
+const skills = await app.locals.templates.getPromptSkills('patient/base-prompt', {
+  conversationUuid,
+});
+```
+
 ## Langfuse Conventions
 
 The package treats certain Langfuse prompt names specially.
@@ -192,9 +249,12 @@ Name skill prompts with either:
 
 For Langfuse skills:
 
-- prompt text becomes `detail`
+- prompt text becomes `detail` (kept as a raw Handlebars template; consumers
+  render it with the live conversation context, including `flow`)
 - `config.description` is required
-- `config.tools` is optional and must be an array of strings
+- `config.tools` is optional: either an array of strings or an
+  `include`/`exclude` rules object (see "Conditional tool binding")
+- `config.composable` is optional; `true` marks the skill as composable
 
 ## Public API
 
@@ -223,6 +283,17 @@ Options:
 ### `templates.getSkills(names)`
 
 Returns skill specs in the requested order.
+
+### `await templates.getPromptSkills(name, options?)`
+
+Returns the skill specs bound to a prompt (top-level `skills` in a filesystem
+prompt yaml, `config.skills` in Langfuse). Accepts the same options as
+`render`; pass the same `conversationUuid` so weighted variants agree.
+
+### `resolveSkillTools(tools, context)`
+
+Resolves a skill's tool binding (plain list or `include`/`exclude` rules)
+against a rendering context.
 
 ### `await templates.getAndCacheTemplate(name, version?, label?)`
 

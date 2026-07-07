@@ -19,6 +19,7 @@ import {
 } from './sources/langfuse.js';
 import {
   loadFilesystemPartialByName,
+  loadFilesystemPromptSkills,
   loadFilesystemSkillByName,
   loadFilesystemTemplateByName,
 } from './sources/filesystem.js';
@@ -44,6 +45,10 @@ export class TemplateManager implements TemplateStore {
   readonly templates: Record<string, LangfuseHandlebarsTemplate<unknown>> = {};
   readonly promptGroups: Record<string, WeightedPromptGroup<unknown>> = {};
   readonly skills: Record<string, SkillSpec> = {};
+  // Fallback prompt→skills bindings read from filesystem prompt yamls, keyed
+  // by base template name. Used when a Langfuse-sourced prompt does not
+  // declare config.skills.
+  private readonly filesystemPromptSkills = new Map<string, string[] | undefined>();
 
   constructor(
     private readonly app: TemplateApp,
@@ -71,6 +76,41 @@ export class TemplateManager implements TemplateStore {
       }
       return skill;
     });
+  }
+
+  /**
+   * Resolve the skills bound to a prompt (via the top-level `skills` list in
+   * a filesystem prompt yaml, or `config.skills` on a Langfuse prompt).
+   * When the resolved (e.g. Langfuse production) template does not declare
+   * skills, the binding falls back to the local prompt yaml, so promoting a
+   * prompt to Langfuse without copying `config.skills` does not silently
+   * unbind its skills. An explicit empty `config.skills` list disables the
+   * fallback.
+   *
+   * Pass the same `conversationUuid` you will pass to {@link render} so that
+   * weighted prompt groups resolve to the same variant in both calls.
+   */
+  async getPromptSkills(
+    templateName: string,
+    options?: {
+      promptVersion?: number;
+      conversationUuid?: string;
+    },
+  ): Promise<SkillSpec[]> {
+    const templateInfo = await this.resolveTemplate(templateName, options);
+    const skillNames = templateInfo.skills ?? (await this.getFilesystemPromptSkills(templateName));
+    return this.getSkills(skillNames ?? []);
+  }
+
+  private async getFilesystemPromptSkills(templateName: string) {
+    if (!this.filesystemPromptSkills.has(templateName)) {
+      const directories = resolveTemplateDirectories(this.options);
+      this.filesystemPromptSkills.set(
+        templateName,
+        await loadFilesystemPromptSkills(directories.promptsDir, templateName),
+      );
+    }
+    return this.filesystemPromptSkills.get(templateName);
   }
 
   async getAndCacheTemplate(templateName: string, version?: number, label?: string) {
@@ -198,6 +238,7 @@ export class TemplateManager implements TemplateStore {
     clearRecord(this.templates);
     clearRecord(this.promptGroups);
     clearRecord(this.skills);
+    this.filesystemPromptSkills.clear();
   }
 
   private async reloadPartialFromLangfuse(promptName: string, directories: TemplateDirectories) {
@@ -255,6 +296,7 @@ export class TemplateManager implements TemplateStore {
     const templateName = update.promptName;
 
     this.clearTemplateEntries(templateName);
+    this.filesystemPromptSkills.delete(templateName);
     await loadFilesystemTemplateByName(this.app, this, directories.promptsDir, templateName);
 
     const promptMeta = await getPromptMetaByName(this.options.langfuse, templateName);

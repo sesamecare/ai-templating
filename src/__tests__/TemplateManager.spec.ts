@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -150,6 +150,130 @@ describe('TemplateManager.reloadFromLangfuse', () => {
     expect(langfuse.api.prompts.list).toHaveBeenCalledTimes(3);
     expect(app.locals.logger.warn).toHaveBeenCalledTimes(2);
     expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('TemplateManager.getPromptSkills', () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  function createFixtureRoot() {
+    const rootDir = mkdtempSync(path.join(os.tmpdir(), 'ai-templating-'));
+    roots.push(rootDir);
+    mkdirSync(path.join(rootDir, 'prompts', 'patient'), { recursive: true });
+    mkdirSync(path.join(rootDir, 'skills', 'patient'), { recursive: true });
+
+    writeFileSync(
+      path.join(rootDir, 'skills', 'patient', 'triage.yaml'),
+      [
+        'description: Triage the patient request.',
+        'detail: Triage instructions for {{flow}}.',
+        'tools:',
+        '  include:',
+        '    - request_location',
+        '    - name: create_support_ticket',
+        '      when: flow == "support-agent"',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      path.join(rootDir, 'prompts', 'patient', 'base-prompt.yaml'),
+      [
+        'skills:',
+        '  - patient/triage',
+        'messages:',
+        '  - role: system',
+        '    content: You are a test prompt.',
+        '',
+      ].join('\n'),
+    );
+
+    return rootDir;
+  }
+
+  function createLangfuse(promptDetails: Record<string, ReturnType<typeof createPromptDetail>>) {
+    return {
+      api: {
+        prompts: {
+          list: vi.fn(async ({ page }: { page: number }) => ({
+            data: page === 1 ? Object.keys(promptDetails).map((name) => ({ name, labels: promptDetails[name].labels })) : [],
+          })),
+        },
+      },
+      prompt: {
+        get: vi.fn(async (name: string) => promptDetails[name]),
+      },
+    } as unknown as LangfuseClient;
+  }
+
+  test('reads the skills binding from the filesystem prompt yaml', async () => {
+    const rootDir = createFixtureRoot();
+    const manager = new TemplateManager(createApp(), {
+      langfuse: createLangfuse({}),
+      rootDir,
+    });
+    await manager.loadTemplates();
+
+    const skills = await manager.getPromptSkills('patient/base-prompt');
+    expect(skills.map((skill) => skill.name)).toEqual(['patient_triage']);
+    // The detail stays a raw template so consumers can render it with the
+    // live conversation context.
+    expect(skills[0].detail).toContain('{{flow}}');
+  });
+
+  test('falls back to the filesystem binding when a production prompt lacks config.skills', async () => {
+    const rootDir = createFixtureRoot();
+    const manager = new TemplateManager(createApp(), {
+      langfuse: createLangfuse({
+        'patient/base-prompt': createPromptDetail('patient/base-prompt', 3, ['production']),
+      }),
+      rootDir,
+    });
+    await manager.loadTemplates();
+
+    // The langfuse production prompt replaced the dev template...
+    expect(manager.templates['patient/base-prompt']?.version).toBe(3);
+    // ...but the skills binding still comes from the local yaml.
+    const skills = await manager.getPromptSkills('patient/base-prompt');
+    expect(skills.map((skill) => skill.name)).toEqual(['patient_triage']);
+  });
+
+  test('config.skills on a langfuse prompt overrides the filesystem binding', async () => {
+    const rootDir = createFixtureRoot();
+    const detail = createPromptDetail('patient/base-prompt', 3, ['production']);
+    (detail.config as Record<string, unknown>).skills = [];
+    const manager = new TemplateManager(createApp(), {
+      langfuse: createLangfuse({ 'patient/base-prompt': detail }),
+      rootDir,
+    });
+    await manager.loadTemplates();
+
+    await expect(manager.getPromptSkills('patient/base-prompt')).resolves.toEqual([]);
+  });
+
+  test('throws when a bound skill does not exist', async () => {
+    const rootDir = createFixtureRoot();
+    writeFileSync(
+      path.join(rootDir, 'prompts', 'patient', 'base-prompt.yaml'),
+      ['skills:', '  - patient/missing', 'messages:', '  - role: system', '    content: Test', ''].join('\n'),
+    );
+    const manager = new TemplateManager(createApp(), {
+      langfuse: createLangfuse({}),
+      rootDir,
+    });
+    await manager.loadTemplates();
+
+    await expect(manager.getPromptSkills('patient/base-prompt')).rejects.toThrow(
+      'Skill patient_missing not found',
+    );
   });
 });
 

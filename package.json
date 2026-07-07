@@ -69,6 +69,7 @@
     "@langfuse/core": "^5.0.1",
     "@openapi-typescript-infra/service": "^6.13.0",
     "@sesamecare-oss/async-pool": "^1.0.5",
+    "@sesamecare-oss/rule-evaluator": "^1.0.0",
     "ai": "^6.0.142",
     "date-fns": "^4.1.0",
     "handlebars": "^4.7.9",
