@@ -177,10 +177,9 @@ describe('TemplateManager.getPromptSkills', () => {
         'description: Triage the patient request.',
         'detail: Triage instructions for {{flow}}.',
         'tools:',
-        '  include:',
-        '    - request_location',
-        '    - name: create_support_ticket',
-        '      when: flow == "support-agent"',
+        '  - request_location',
+        '  - name: create_support_ticket',
+        '    include: flow == "support-agent"',
         '',
       ].join('\n'),
     );

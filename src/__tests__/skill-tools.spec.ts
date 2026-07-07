@@ -12,18 +12,16 @@ describe('resolveSkillTools', () => {
     expect(resolveSkillTools(undefined, { flow: 'patient-generic' })).toEqual([]);
   });
 
-  test('returns plain arrays unconditionally', () => {
+  test('returns plain string lists unconditionally', () => {
     expect(resolveSkillTools(['a', 'b'], { flow: 'patient-generic' })).toEqual(['a', 'b']);
   });
 
-  test('includes unconditional entries and rule matches', () => {
-    const tools = {
-      include: [
-        'request_location',
-        { name: 'suggest_providers_for_service', when: 'flow == "patient-generic"' },
-        { name: 'create_support_ticket', when: 'flow == "support-agent"' },
-      ],
-    };
+  test('includes unconditional entries and include-rule matches', () => {
+    const tools = [
+      'request_location',
+      { name: 'suggest_providers_for_service', include: 'flow == "patient-generic"' },
+      { name: 'create_support_ticket', include: 'flow == "support-agent"' },
+    ];
 
     expect(resolveSkillTools(tools, { flow: 'patient-generic' })).toEqual([
       'request_location',
@@ -35,66 +33,88 @@ describe('resolveSkillTools', () => {
     ]);
   });
 
-  test('exclusion wins over inclusion', () => {
-    const tools = {
-      include: ['alert', 'request_location'],
-      exclude: [{ name: 'alert', when: 'flow == "customer-support"' }],
-    };
+  test('an exclude rule drops the tool only when it fires', () => {
+    const tools = [
+      'request_location',
+      { name: 'alert', exclude: 'flow == "customer-support"' },
+    ];
 
     expect(resolveSkillTools(tools, { flow: 'customer-support' })).toEqual(['request_location']);
     expect(resolveSkillTools(tools, { flow: 'patient-generic' })).toEqual([
-      'alert',
       'request_location',
+      'alert',
     ]);
   });
 
-  test('unconditional exclude always removes the tool', () => {
-    const tools = {
-      include: ['alert'],
-      exclude: ['alert'],
-    };
-    expect(resolveSkillTools(tools, {})).toEqual([]);
+  test('exclusion wins over inclusion from another entry', () => {
+    const tools = ['alert', { name: 'alert', exclude: 'flow == "customer-support"' }];
+
+    expect(resolveSkillTools(tools, { flow: 'customer-support' })).toEqual([]);
+    expect(resolveSkillTools(tools, { flow: 'patient-generic' })).toEqual(['alert']);
+  });
+
+  test('an entry can carry both include and exclude rules', () => {
+    const tools = [
+      {
+        name: 'suggest_subscription',
+        include: 'flow == "patient-generic"',
+        exclude: 'options.subscribed == 1',
+      },
+    ];
+
+    expect(resolveSkillTools(tools, { flow: 'patient-generic', options: {} })).toEqual([
+      'suggest_subscription',
+    ]);
+    expect(
+      resolveSkillTools(tools, { flow: 'patient-generic', options: { subscribed: 1 } }),
+    ).toEqual([]);
+    expect(resolveSkillTools(tools, { flow: 'support-agent', options: {} })).toEqual([]);
   });
 
   test('rules can reach nested context values', () => {
-    const tools = {
-      include: [{ name: 'suggest_subscription', when: 'options.patient_id and flow != "voice"' }],
-    };
+    const tools = [
+      { name: 'suggest_subscription', include: 'options.patient_id and flow != "voice"' },
+    ];
     expect(
       resolveSkillTools(tools, { flow: 'patient-generic', options: { patient_id: 'pt_1' } }),
     ).toEqual(['suggest_subscription']);
     expect(resolveSkillTools(tools, { flow: 'patient-generic', options: {} })).toEqual([]);
   });
 
-  test('deduplicates repeated include entries', () => {
-    expect(resolveSkillTools({ include: ['a', 'a', { name: 'a' }] }, {})).toEqual(['a']);
+  test('deduplicates repeated entries', () => {
+    expect(resolveSkillTools(['a', 'a', { name: 'a' }], {})).toEqual(['a']);
   });
 });
 
 describe('validateSkillTools', () => {
-  test('accepts undefined, plain arrays, and rule objects', () => {
+  test('accepts undefined, plain string lists, and rule entries', () => {
     expect(validateSkillTools(undefined)).toBeUndefined();
     expect(validateSkillTools(['a'])).toBeUndefined();
     expect(
-      validateSkillTools({
-        include: ['a', { name: 'b', when: 'flow == "x"' }],
-        exclude: [{ name: 'c' }],
-      }),
+      validateSkillTools([
+        'a',
+        { name: 'b', include: 'flow == "x"' },
+        { name: 'c', exclude: 'flow == "y"' },
+        { name: 'd', include: 'flow == "x"', exclude: 'options.hidden == 1' },
+      ]),
     ).toBeUndefined();
   });
 
   test('rejects malformed shapes', () => {
-    expect(validateSkillTools([1])).toMatch(/must be strings/);
+    expect(validateSkillTools([1])).toMatch(/entries must be strings/);
     expect(validateSkillTools('nope')).toMatch(/must be an array/);
-    expect(validateSkillTools({ includes: [] })).toMatch(/unknown keys/);
-    expect(validateSkillTools({ include: 'a' })).toMatch(/must be an array/);
-    expect(validateSkillTools({ include: [{ when: 'x == 1' }] })).toMatch(/missing a name/);
-    expect(validateSkillTools({ include: [{ name: 'a', when: 5 }] })).toMatch(/non-string when/);
+    expect(validateSkillTools({ include: ['a'] })).toMatch(/must be an array/);
+    expect(validateSkillTools([{ name: 'a', when: 'x == 1' }])).toMatch(/unknown keys/);
+    expect(validateSkillTools([{ include: 'x == 1' }])).toMatch(/missing a name/);
+    expect(validateSkillTools([{ name: 'a', include: 5 }])).toMatch(/non-string include/);
   });
 
   test('rejects rules that fail to compile', () => {
-    expect(validateSkillTools({ include: [{ name: 'a', when: 'flow ==' }] })).toMatch(
-      /invalid when rule/,
+    expect(validateSkillTools([{ name: 'a', include: 'flow ==' }])).toMatch(
+      /invalid include rule/,
+    );
+    expect(validateSkillTools([{ name: 'a', exclude: 'and and' }])).toMatch(
+      /invalid exclude rule/,
     );
   });
 });

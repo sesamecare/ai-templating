@@ -52,30 +52,28 @@ export type LangfusePromptDetail =
   | RefinedPromptDetail<ChatPromptClient, 'chat', ChatMessageWithPlaceholders[]>;
 
 /**
- * A conditional tool entry. `when` is a @sesamecare-oss/rule-evaluator
- * expression evaluated against the same context used to render the skill
- * detail (which always includes the top-level `flow`). An entry with no
- * `when` always applies. A bare string is shorthand for `{ name }`.
+ * A conditional tool entry. `include` and `exclude` are
+ * @sesamecare-oss/rule-evaluator expressions evaluated against the same
+ * context used to render the skill detail (which always includes the
+ * top-level `flow`):
+ *
+ * - `include`: the tool is bound only when the rule evaluates truthy
+ * - `exclude`: the tool is dropped when the rule evaluates truthy, even if
+ *   another entry included it — exclusion wins
+ *
+ * An entry with neither rule always applies. A bare string is shorthand for
+ * `{ name }`.
  */
 export interface SkillToolRule {
   name: string;
-  when?: string;
+  include?: string;
+  exclude?: string;
 }
 
-export type SkillToolRuleEntry = string | SkillToolRule;
+export type SkillToolEntry = string | SkillToolRule;
 
-/**
- * Rule-based tool binding: `include` selects tools (subject to their `when`
- * rules), then `exclude` removes matching ones. Exclusion wins over
- * inclusion.
- */
-export interface SkillToolRules {
-  include?: SkillToolRuleEntry[];
-  exclude?: SkillToolRuleEntry[];
-}
-
-/** Either a plain (unconditional) tool list or rule-based include/exclude. */
-export type SkillTools = string[] | SkillToolRules;
+/** A skill's tool binding: a list of unconditional and/or rule-based entries. */
+export type SkillTools = SkillToolEntry[];
 
 export interface SkillSpec {
   name: string;

@@ -158,8 +158,8 @@ const [triageSkill] = app.locals.templates.getSkills(['patient_triage']);
 
 ### Conditional tool binding
 
-Instead of a plain list, `tools` may be an `include`/`exclude` object whose
-entries carry optional `when` rules. Rules are
+Any `tools` entry may be an object with a `name` and optional `include` /
+`exclude` rules instead of a bare string. Rules are
 [`@sesamecare-oss/rule-evaluator`](https://github.com/sesamecare/rule-evaluator)
 expressions evaluated against the same context used to render the skill detail
 (the consumer should always provide the active `flow` at the top level). This
@@ -169,18 +169,18 @@ tools to each:
 ```yaml
 description: Everything about prescriptions at Sesame.
 tools:
-  include:
-    - request_location
-    - name: suggest_providers_for_service
-      when: flow == "patient-generic"
-    - name: create_support_ticket
-      when: flow == "support-agent"
-  exclude:
-    - name: alert
-      when: flow == "customer-support"
+  - request_location
+  - name: suggest_providers_for_service
+    include: flow == "patient-generic"
+  - name: create_support_ticket
+    include: flow == "support-agent"
+  - name: alert
+    exclude: flow == "customer-support"
 ```
 
-`exclude` always wins over `include`. Resolve the binding with:
+An entry with an `include` rule is bound only when the rule is truthy; an
+entry with an `exclude` rule is dropped when the rule is truthy (even if
+another entry included it — exclusion wins). Resolve the binding with:
 
 ```ts
 import { resolveSkillTools } from '@sesamecare-oss/ai-templating';
@@ -252,8 +252,8 @@ For Langfuse skills:
 - prompt text becomes `detail` (kept as a raw Handlebars template; consumers
   render it with the live conversation context, including `flow`)
 - `config.description` is required
-- `config.tools` is optional: either an array of strings or an
-  `include`/`exclude` rules object (see "Conditional tool binding")
+- `config.tools` is optional: an array of tool names and/or
+  `{ name, include?, exclude? }` rule entries (see "Conditional tool binding")
 - `config.composable` is optional; `true` marks the skill as composable
 
 ## Public API
@@ -292,8 +292,8 @@ prompt yaml, `config.skills` in Langfuse). Accepts the same options as
 
 ### `resolveSkillTools(tools, context)`
 
-Resolves a skill's tool binding (plain list or `include`/`exclude` rules)
-against a rendering context.
+Resolves a skill's tool binding (tool names and/or rule entries) against a
+rendering context.
 
 ### `await templates.getAndCacheTemplate(name, version?, label?)`
 
