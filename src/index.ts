@@ -39,6 +39,7 @@ export type {
   TemplateDirectories,
   TemplateManagerOptions,
   TemplatePartialSource,
+  TemplateResolveOptions,
   TemplateStore,
   WeightedPromptGroup,
 } from './types.js';

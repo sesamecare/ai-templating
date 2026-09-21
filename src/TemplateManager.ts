@@ -28,6 +28,7 @@ import {
   cacheTemplateVersion,
   createLangfuseTemplate,
   getProductionLabel,
+  getVersionedTemplateKey,
   mergeProductionTemplateIntoStore,
   selectPromptVariant,
 } from './template-store.js';
@@ -40,9 +41,12 @@ import type {
   TemplateApp,
   TemplateDirectories,
   TemplateManagerOptions,
+  TemplateResolveOptions,
   TemplateStore,
   WeightedPromptGroup,
 } from './types.js';
+
+const DEFAULT_LABEL_RESOLUTION_CACHE_TTL_MS = 30_000;
 
 export class TemplateManager implements TemplateStore {
   readonly templates: Record<string, LangfuseHandlebarsTemplate<unknown>> = {};
@@ -52,6 +56,9 @@ export class TemplateManager implements TemplateStore {
   // by base template name. Used when a Langfuse-sourced prompt does not
   // declare config.skills.
   private readonly filesystemPromptSkills = new Map<string, RuleGatedName[] | undefined>();
+  // Cached label→version resolutions (see TemplateResolveOptions.label),
+  // keyed by `${templateName}::label:${label}`.
+  private readonly labelResolutionCache = new Map<string, { version: number; expiresAt: number }>();
 
   constructor(
     private readonly app: TemplateApp,
@@ -99,11 +106,7 @@ export class TemplateManager implements TemplateStore {
    */
   async getPromptSkills(
     templateName: string,
-    options?: {
-      promptVersion?: number;
-      conversationUuid?: string;
-      context?: RuleContext;
-    },
+    options?: TemplateResolveOptions & { context?: RuleContext },
   ): Promise<SkillSpec[]> {
     const templateInfo = await this.resolveTemplate(templateName, options);
     const entries = templateInfo.skills ?? (await this.getFilesystemPromptSkills(templateName));
@@ -186,10 +189,7 @@ export class TemplateManager implements TemplateStore {
     template: string | TemplateDelegate<T>,
     data: T,
     placeholders: Record<string, ModelMessage[]> | undefined,
-    options?: {
-      promptVersion?: number;
-      conversationUuid?: string;
-    },
+    options?: TemplateResolveOptions,
   ): Promise<{
     messages: ModelMessage[];
     config?: LangfuseHandlebarsTemplate['config'];
@@ -227,15 +227,13 @@ export class TemplateManager implements TemplateStore {
     return { messages };
   }
 
-  private async resolveTemplate(
-    templateName: string,
-    options?: {
-      promptVersion?: number;
-      conversationUuid?: string;
-    },
-  ) {
+  private async resolveTemplate(templateName: string, options?: TemplateResolveOptions) {
     if (options?.promptVersion && this.templates[templateName]?.version !== options.promptVersion) {
       return this.getAndCacheTemplate(templateName, options.promptVersion);
+    }
+
+    if (options?.label) {
+      return this.resolveLabeledTemplate(templateName, options.label);
     }
 
     if (!this.templates[templateName] && !this.promptGroups[templateName]) {
@@ -253,6 +251,52 @@ export class TemplateManager implements TemplateStore {
     }
 
     throw new ServiceError(this.app, `Template ${templateName} not found`, { status: 400 });
+  }
+
+  /**
+   * Resolve a template pinned to an explicit, non-`production*` Langfuse
+   * label (e.g. a client-tier pin like `channel-mobile`). Label→version
+   * lookups are cached for `labelResolutionCacheTtlMs` (default 30s) since,
+   * unlike an explicit `promptVersion`, a label's target version can move at
+   * any time and every caller passing the same label would otherwise hit
+   * Langfuse live on every call.
+   *
+   * This intentionally never writes to `this.templates[templateName]` (the
+   * shared default/production pointer) — only to the version-keyed cache —
+   * so a labeled lookup can never clobber what unlabeled callers resolve to.
+   */
+  private async resolveLabeledTemplate(templateName: string, label: string) {
+    const cacheKey = `${templateName}::label:${label}`;
+    const cached = this.labelResolutionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      const versioned = this.templates[getVersionedTemplateKey(templateName, cached.version)];
+      if (versioned) {
+        return versioned;
+      }
+    }
+
+    const template = await this.getAndCacheLabeledTemplate(templateName, label);
+    this.labelResolutionCache.set(cacheKey, {
+      version: template.version,
+      expiresAt: Date.now() + (this.options.labelResolutionCacheTtlMs ?? DEFAULT_LABEL_RESOLUTION_CACHE_TTL_MS),
+    });
+    return template;
+  }
+
+  private async getAndCacheLabeledTemplate(templateName: string, label: string) {
+    const templateDetail = await this.options.langfuse.prompt.get(templateName, {
+      label,
+      cacheTtlSeconds: 0,
+    });
+    if (!templateDetail) {
+      throw new ServiceError(this.app, `Template ${templateName} (${label}) not found`, {
+        status: 400,
+      });
+    }
+
+    const template = createLangfuseTemplate(templateName, templateDetail, label);
+    cacheTemplateVersion(this, templateName, template);
+    return template;
   }
 
   private clearStore() {

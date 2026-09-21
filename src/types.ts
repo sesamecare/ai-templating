@@ -121,6 +121,32 @@ export interface TemplateDirectories {
 export interface TemplateManagerOptions {
   langfuse: LangfuseClient;
   rootDir?: string;
+  /**
+   * TTL (ms) for cached label→version resolutions (see
+   * {@link TemplateResolveOptions.label}). Unlike `promptVersion`, a label's
+   * target version can change at any time, so repeated lookups for the same
+   * label are cached for this long instead of hitting Langfuse on every
+   * call. Defaults to 30 seconds.
+   */
+  labelResolutionCacheTtlMs?: number;
+}
+
+/**
+ * Options accepted by {@link TemplateStore.render} and
+ * {@link TemplateStore.getPromptSkills} to pin resolution away from the
+ * default `production*` label group.
+ */
+export interface TemplateResolveOptions {
+  /** Force a specific Langfuse version. Takes precedence over `label`. */
+  promptVersion?: number;
+  /**
+   * Resolve an explicit Langfuse label instead of the cached `production*`
+   * group, e.g. a client-tier pin like `channel-mobile`. Must not start
+   * with `production` — those labels are reserved for the weighted
+   * canary/variant group and are not deterministically selectable per call.
+   */
+  label?: string;
+  conversationUuid?: string;
 }
 
 export interface LangfuseReloadRequest {

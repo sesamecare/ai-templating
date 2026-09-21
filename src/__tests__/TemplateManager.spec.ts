@@ -352,6 +352,83 @@ describe('TemplateManager.getPromptSkills', () => {
   });
 });
 
+describe('TemplateManager.render label pinning', () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  function createFixtureRoot() {
+    const rootDir = mkdtempSync(path.join(os.tmpdir(), 'ai-templating-'));
+    roots.push(rootDir);
+    mkdirSync(path.join(rootDir, 'prompts'), { recursive: true });
+    mkdirSync(path.join(rootDir, 'skills'), { recursive: true });
+    return rootDir;
+  }
+
+  function createLabeledLangfuse() {
+    const promptGetCalls: (string | undefined)[] = [];
+    const langfuse = {
+      api: {
+        prompts: {
+          list: vi.fn(async ({ page }: { page: number }) => ({
+            data: page === 1 ? [{ name: 'patient/base-prompt', labels: ['production'] }] : [],
+          })),
+        },
+      },
+      prompt: {
+        get: vi.fn(async (name: string, opts?: { label?: string }) => {
+          promptGetCalls.push(opts?.label);
+          if (opts?.label === 'channel-mobile') {
+            return createPromptDetail(name, 3, ['channel-mobile']);
+          }
+          return createPromptDetail(name, 5, ['production']);
+        }),
+      },
+    } as unknown as LangfuseClient;
+    return { langfuse, promptGetCalls };
+  }
+
+  test('resolves an explicit label without disturbing the default production pointer', async () => {
+    const rootDir = createFixtureRoot();
+    const { langfuse } = createLabeledLangfuse();
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    expect(manager.templates['patient/base-prompt']?.version).toBe(5);
+
+    const labeled = await manager.render('patient/base-prompt', {}, undefined, {
+      label: 'channel-mobile',
+    });
+    expect(labeled.metadata?.langfusePrompt).toContain('"version":3');
+
+    // Resolving the label must not have clobbered the shared production pointer.
+    expect(manager.templates['patient/base-prompt']?.version).toBe(5);
+
+    const defaultRender = await manager.render('patient/base-prompt', {}, undefined);
+    expect(defaultRender.metadata?.langfusePrompt).toContain('"version":5');
+  });
+
+  test('caches label→version resolution instead of hitting Langfuse on every call', async () => {
+    const rootDir = createFixtureRoot();
+    const { langfuse, promptGetCalls } = createLabeledLangfuse();
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    promptGetCalls.length = 0;
+    await manager.render('patient/base-prompt', {}, undefined, { label: 'channel-mobile' });
+    await manager.render('patient/base-prompt', {}, undefined, { label: 'channel-mobile' });
+
+    expect(promptGetCalls.filter((label) => label === 'channel-mobile')).toHaveLength(1);
+  });
+});
+
 function createPromptDetail(name: string, version: number, labels: string[]) {
   return {
     type: 'text' as const,
