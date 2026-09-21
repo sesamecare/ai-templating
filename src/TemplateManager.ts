@@ -57,8 +57,13 @@ export class TemplateManager implements TemplateStore {
   // declare config.skills.
   private readonly filesystemPromptSkills = new Map<string, RuleGatedName[] | undefined>();
   // Cached label→version resolutions (see TemplateResolveOptions.label),
-  // keyed by `${templateName}::label:${label}`.
-  private readonly labelResolutionCache = new Map<string, { version: number; expiresAt: number }>();
+  // keyed by `${templateName}::label:${label}`. `version: undefined` caches
+  // a miss (label doesn't exist / lookup failed) so a still-missing label
+  // doesn't hit Langfuse on every call either.
+  private readonly labelResolutionCache = new Map<
+    string,
+    { version: number | undefined; expiresAt: number }
+  >();
 
   constructor(
     private readonly app: TemplateApp,
@@ -233,7 +238,14 @@ export class TemplateManager implements TemplateStore {
     }
 
     if (options?.label) {
-      return this.resolveLabeledTemplate(templateName, options.label);
+      const labeled = await this.resolveLabeledTemplate(templateName, options.label);
+      if (labeled) {
+        return labeled;
+      }
+      // Fall through to default/production resolution below: a label that
+      // doesn't exist yet for this prompt (e.g. a client-tier pin like
+      // "channel-mobile" not created for every prompt from day one) must
+      // never fail the whole request.
     }
 
     if (!this.templates[templateName] && !this.promptGroups[templateName]) {
@@ -264,23 +276,43 @@ export class TemplateManager implements TemplateStore {
    * This intentionally never writes to `this.templates[templateName]` (the
    * shared default/production pointer) — only to the version-keyed cache —
    * so a labeled lookup can never clobber what unlabeled callers resolve to.
+   *
+   * Returns `undefined` (never throws) when the label doesn't exist for this
+   * prompt, or the lookup otherwise fails — callers are expected to fall
+   * back to default/production resolution rather than fail the request.
+   * A miss is cached too, so a still-missing label doesn't hit Langfuse on
+   * every call either.
    */
   private async resolveLabeledTemplate(templateName: string, label: string) {
     const cacheKey = `${templateName}::label:${label}`;
     const cached = this.labelResolutionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
+      if (cached.version === undefined) {
+        return undefined;
+      }
       const versioned = this.templates[getVersionedTemplateKey(templateName, cached.version)];
       if (versioned) {
         return versioned;
       }
     }
 
-    const template = await this.getAndCacheLabeledTemplate(templateName, label);
-    this.labelResolutionCache.set(cacheKey, {
-      version: template.version,
-      expiresAt: Date.now() + (this.options.labelResolutionCacheTtlMs ?? DEFAULT_LABEL_RESOLUTION_CACHE_TTL_MS),
-    });
-    return template;
+    const ttlMs = this.options.labelResolutionCacheTtlMs ?? DEFAULT_LABEL_RESOLUTION_CACHE_TTL_MS;
+    try {
+      const template = await this.getAndCacheLabeledTemplate(templateName, label);
+      this.labelResolutionCache.set(cacheKey, { version: template.version, expiresAt: Date.now() + ttlMs });
+      return template;
+    } catch (error) {
+      this.app.locals.logger.warn(
+        {
+          templateName,
+          label,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        'Labeled template lookup failed; falling back to default resolution',
+      );
+      this.labelResolutionCache.set(cacheKey, { version: undefined, expiresAt: Date.now() + ttlMs });
+      return undefined;
+    }
   }
 
   private async getAndCacheLabeledTemplate(templateName: string, label: string) {

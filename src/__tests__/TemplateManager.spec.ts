@@ -427,6 +427,41 @@ describe('TemplateManager.render label pinning', () => {
 
     expect(promptGetCalls.filter((label) => label === 'channel-mobile')).toHaveLength(1);
   });
+
+  test('falls back to default resolution when the label does not exist for this prompt', async () => {
+    const rootDir = createFixtureRoot();
+    const promptGetCalls: (string | undefined)[] = [];
+    const langfuse = {
+      api: {
+        prompts: {
+          list: vi.fn(async ({ page }: { page: number }) => ({
+            data: page === 1 ? [{ name: 'patient/base-prompt', labels: ['production'] }] : [],
+          })),
+        },
+      },
+      prompt: {
+        get: vi.fn(async (name: string, opts?: { label?: string }) => {
+          promptGetCalls.push(opts?.label);
+          if (opts?.label === 'channel-mobile') {
+            return undefined;
+          }
+          return createPromptDetail(name, 5, ['production']);
+        }),
+      },
+    } as unknown as LangfuseClient;
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    const rendered = await manager.render('patient/base-prompt', {}, undefined, {
+      label: 'channel-mobile',
+    });
+    expect(rendered.metadata?.langfusePrompt).toContain('"version":5');
+
+    // A missing label is also cached, so it doesn't hit Langfuse on every call.
+    promptGetCalls.length = 0;
+    await manager.render('patient/base-prompt', {}, undefined, { label: 'channel-mobile' });
+    expect(promptGetCalls.filter((label) => label === 'channel-mobile')).toHaveLength(0);
+  });
 });
 
 function createPromptDetail(name: string, version: number, labels: string[]) {
