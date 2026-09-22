@@ -91,6 +91,14 @@ export interface SkillSpec {
   tools?: SkillTools;
   /** When true, this skill can be activated alongside other skills in the same turn. */
   composable?: boolean;
+  /**
+   * The original Langfuse prompt name this skill was loaded from (e.g.
+   * `skill/patient/handle_costco_question`), set only for Langfuse-sourced
+   * skills. Used to resolve an explicit-label variant of this skill on
+   * demand (see {@link TemplateResolveOptions.label}); filesystem-only
+   * skills have no labeled variants, so this is left unset for them.
+   */
+  langfuseName?: string;
 }
 
 export interface DevPrompt {

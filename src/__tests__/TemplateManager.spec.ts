@@ -464,6 +464,140 @@ describe('TemplateManager.render label pinning', () => {
   });
 });
 
+describe('TemplateManager.getSkills label pinning', () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  function createFixtureRoot() {
+    const rootDir = mkdtempSync(path.join(os.tmpdir(), 'ai-templating-'));
+    roots.push(rootDir);
+    mkdirSync(path.join(rootDir, 'prompts'), { recursive: true });
+    mkdirSync(path.join(rootDir, 'skills', 'patient'), { recursive: true });
+
+    writeFileSync(
+      path.join(rootDir, 'skills', 'patient', 'triage.yaml'),
+      ['description: Filesystem-only skill.', 'detail: Filesystem triage detail.', ''].join('\n'),
+    );
+
+    return rootDir;
+  }
+
+  function createSkillPromptDetail(description: string) {
+    return {
+      type: 'text' as const,
+      prompt: description,
+      labels: ['production'],
+      version: 1,
+      config: { description: 'A test skill' },
+      toJSON: () => JSON.stringify({ description }),
+    };
+  }
+
+  function createSkillLangfuse() {
+    const promptGetCalls: { name: string; label?: string }[] = [];
+    const langfuse = {
+      api: {
+        prompts: {
+          list: vi.fn(async ({ page }: { page: number }) => ({
+            data:
+              page === 1
+                ? [
+                    { name: 'skill:patient/handle_costco_question', labels: [] },
+                    { name: 'skill:patient/other', labels: [] },
+                  ]
+                : [],
+          })),
+        },
+      },
+      prompt: {
+        get: vi.fn(async (name: string, opts?: { label?: string }) => {
+          promptGetCalls.push({ name, label: opts?.label });
+          if (name === 'skill:patient/handle_costco_question') {
+            return opts?.label === 'channel-mobile'
+              ? createSkillPromptDetail('Legacy Costco skill: verify membership up front.')
+              : createSkillPromptDetail('Current Costco skill: provisional pricing right away.');
+          }
+          if (name === 'skill:patient/other') {
+            return opts?.label === 'channel-mobile'
+              ? undefined
+              : createSkillPromptDetail('Default other-skill detail.');
+          }
+          return undefined;
+        }),
+      },
+    } as unknown as LangfuseClient;
+    return { langfuse, promptGetCalls };
+  }
+
+  test('resolves a labeled skill variant without disturbing the default body', async () => {
+    const rootDir = createFixtureRoot();
+    const { langfuse } = createSkillLangfuse();
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    expect(manager.skills['patient_handle_costco_question']?.detail).toBe(
+      'Current Costco skill: provisional pricing right away.',
+    );
+
+    const [labeled] = await manager.getSkills(['patient_handle_costco_question'], {
+      label: 'channel-mobile',
+    });
+    expect(labeled.detail).toBe('Legacy Costco skill: verify membership up front.');
+
+    // Resolving the label must not have clobbered the shared default skill.
+    expect(manager.skills['patient_handle_costco_question']?.detail).toBe(
+      'Current Costco skill: provisional pricing right away.',
+    );
+  });
+
+  test('falls back to the default body when the label does not exist for a skill', async () => {
+    const rootDir = createFixtureRoot();
+    const { langfuse } = createSkillLangfuse();
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    const [fallback] = await manager.getSkills(['patient_other'], { label: 'channel-mobile' });
+    expect(fallback.detail).toBe('Default other-skill detail.');
+  });
+
+  test('leaves filesystem-only skills unaffected by a label', async () => {
+    const rootDir = createFixtureRoot();
+    const { langfuse, promptGetCalls } = createSkillLangfuse();
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    promptGetCalls.length = 0;
+    const [skill] = await manager.getSkills(['patient_triage'], { label: 'channel-mobile' });
+    expect(skill.detail).toBe('Filesystem triage detail.');
+    expect(promptGetCalls).toHaveLength(0);
+  });
+
+  test('caches labeled skill resolution instead of hitting Langfuse on every call', async () => {
+    const rootDir = createFixtureRoot();
+    const { langfuse, promptGetCalls } = createSkillLangfuse();
+    const manager = new TemplateManager(createApp(), { langfuse, rootDir });
+    await manager.loadTemplates();
+
+    promptGetCalls.length = 0;
+    await manager.getSkills(['patient_handle_costco_question'], { label: 'channel-mobile' });
+    await manager.getSkills(['patient_handle_costco_question'], { label: 'channel-mobile' });
+
+    expect(
+      promptGetCalls.filter(
+        (call) => call.name === 'skill:patient/handle_costco_question' && call.label === 'channel-mobile',
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 function createPromptDetail(name: string, version: number, labels: string[]) {
   return {
     type: 'text' as const,

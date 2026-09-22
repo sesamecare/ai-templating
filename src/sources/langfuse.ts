@@ -2,7 +2,13 @@ import type { ChatPromptClient, LangfuseClient, TextPromptClient } from '@langfu
 import type { PromptMeta } from '@langfuse/core';
 import { asyncPool } from '@sesamecare-oss/async-pool';
 
-import type { SkillTools, TemplateApp, TemplatePartialSource, TemplateStore } from '../types.js';
+import type {
+  SkillSpec,
+  SkillTools,
+  TemplateApp,
+  TemplatePartialSource,
+  TemplateStore,
+} from '../types.js';
 import { cacheTemplateVersion, createLangfuseTemplate, getVariantName } from '../template-store.js';
 import { normalizeSkillName, validateSkillTools } from '../skill-tools.js';
 import { normalize } from '../weighted-selector.js';
@@ -219,25 +225,41 @@ async function loadLangfuseSkill(
   store: TemplateStore,
   prompt: PromptSummary,
 ) {
-  const skillName = normalizeSkillName(prompt.name);
   const promptDetail = await langfuse.prompt.get(prompt.name);
   if (!promptDetail) {
     return;
   }
 
+  const skill = buildSkillSpecFromLangfusePrompt(app, prompt.name, promptDetail);
+  if (skill) {
+    store.skills[skill.name] = skill;
+  }
+}
+
+/**
+ * Build a {@link SkillSpec} from a fetched Langfuse skill prompt, or log and
+ * return `undefined` if it's malformed. Shared between the bulk inventory
+ * load ({@link loadLangfuseSkill}) and per-label skill resolution in
+ * {@link TemplateManager}, so both paths validate identically.
+ */
+export function buildSkillSpecFromLangfusePrompt(
+  app: TemplateApp,
+  langfuseName: string,
+  promptDetail: TextPromptClient | ChatPromptClient,
+): SkillSpec | undefined {
   if (typeof promptDetail.prompt !== 'string') {
-    app.locals.logger.error({ name: prompt.name }, 'Skill prompt must be a text prompt');
-    return;
+    app.locals.logger.error({ name: langfuseName }, 'Skill prompt must be a text prompt');
+    return undefined;
   }
 
   const parsedConfig = parseSkillConfig(promptDetail.config);
   if (typeof parsedConfig === 'string') {
-    app.locals.logger.error({ name: prompt.name }, parsedConfig);
-    return;
+    app.locals.logger.error({ name: langfuseName }, parsedConfig);
+    return undefined;
   }
 
-  store.skills[skillName] = {
-    name: skillName,
+  return {
+    name: normalizeSkillName(langfuseName),
     description: parsedConfig.description,
     // Keep the raw template: skill detail is rendered by the consumer with
     // the live conversation context (flow, options, ...), so a single skill
@@ -245,6 +267,7 @@ async function loadLangfuseSkill(
     detail: promptDetail.prompt,
     tools: parsedConfig.tools,
     ...(parsedConfig.composable ? { composable: true } : {}),
+    langfuseName,
   };
 }
 

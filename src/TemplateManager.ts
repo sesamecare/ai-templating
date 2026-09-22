@@ -9,6 +9,7 @@ import { ServiceError } from '@openapi-typescript-infra/service';
 import { resolveTemplateDirectories } from './template-files.js';
 import { loadTemplateStore } from './template-loader.js';
 import {
+  buildSkillSpecFromLangfusePrompt,
   getPromptMetaByName,
   isPartialPromptName,
   isSkillPromptName,
@@ -64,6 +65,12 @@ export class TemplateManager implements TemplateStore {
     string,
     { version: number | undefined; expiresAt: number }
   >();
+  // Cached label->SkillSpec resolutions (see getSkills), keyed by
+  // `${langfuseName}::label:${label}`. `skill: undefined` caches a miss.
+  private readonly labeledSkillCache = new Map<
+    string,
+    { skill: SkillSpec | undefined; expiresAt: number }
+  >();
 
   constructor(
     private readonly app: TemplateApp,
@@ -83,14 +90,70 @@ export class TemplateManager implements TemplateStore {
     );
   }
 
-  getSkills(skillNames: string[]) {
-    return skillNames.map((name) => {
-      const skill = this.skills[name];
-      if (!skill) {
-        throw new ServiceError(this.app, `Skill ${name} not found`, { status: 400 });
-      }
+  /**
+   * Resolve skill specs by name. With `options.label`, each skill that was
+   * loaded from Langfuse is re-resolved at that label instead of its
+   * default/loaded body (e.g. a client-tier pin like `channel-mobile`) —
+   * the same label a prompt resolves against, applied to its skills too.
+   * Skills with no Langfuse origin (filesystem-only) have no labeled
+   * variants and always return their single loaded body. A label that
+   * doesn't exist for a given skill falls back to that default body rather
+   * than failing — see {@link resolveLabeledSkill}.
+   */
+  async getSkills(skillNames: string[], options?: { label?: string }): Promise<SkillSpec[]> {
+    return Promise.all(skillNames.map((name) => this.resolveSkill(name, options?.label)));
+  }
+
+  private async resolveSkill(name: string, label: string | undefined): Promise<SkillSpec> {
+    const skill = this.skills[name];
+    if (!skill) {
+      throw new ServiceError(this.app, `Skill ${name} not found`, { status: 400 });
+    }
+    if (!label || !skill.langfuseName) {
       return skill;
-    });
+    }
+    const labeled = await this.resolveLabeledSkill(skill.langfuseName, label);
+    return labeled ?? skill;
+  }
+
+  /**
+   * Resolve an explicit-label variant of a Langfuse-sourced skill. Mirrors
+   * {@link resolveLabeledTemplate}: cached with a short TTL (including a
+   * cached miss), and never falls back to throwing — a label that doesn't
+   * exist for this skill just isn't found here, letting the caller use the
+   * default body instead.
+   */
+  private async resolveLabeledSkill(langfuseName: string, label: string) {
+    const cacheKey = `${langfuseName}::label:${label}`;
+    const cached = this.labeledSkillCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.skill;
+    }
+
+    const ttlMs = this.options.labelResolutionCacheTtlMs ?? DEFAULT_LABEL_RESOLUTION_CACHE_TTL_MS;
+    let skill: SkillSpec | undefined;
+    try {
+      const promptDetail = await this.options.langfuse.prompt.get(langfuseName, {
+        label,
+        cacheTtlSeconds: 0,
+      });
+      skill = promptDetail
+        ? buildSkillSpecFromLangfusePrompt(this.app, langfuseName, promptDetail)
+        : undefined;
+    } catch (error) {
+      this.app.locals.logger.warn(
+        {
+          langfuseName,
+          label,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        'Labeled skill lookup failed; falling back to default resolution',
+      );
+      skill = undefined;
+    }
+
+    this.labeledSkillCache.set(cacheKey, { skill, expiresAt: Date.now() + ttlMs });
+    return skill;
   }
 
   /**
@@ -128,7 +191,7 @@ export class TemplateManager implements TemplateStore {
     }
 
     const skillNames = resolveRuleGatedNames(entries, options?.context ?? { flow: '' });
-    return this.getSkills(skillNames);
+    return this.getSkills(skillNames, { label: options?.label });
   }
 
   private async getFilesystemPromptSkills(templateName: string) {
