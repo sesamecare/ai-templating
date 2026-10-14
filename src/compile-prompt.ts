@@ -53,8 +53,6 @@ export function compileLangfusePrompt<T>(
     placeholders: Record<string, ModelMessage[]> | undefined,
     options?: RuntimeOptions,
   ) => {
-    void placeholders;
-
     return [
       {
         role: 'user',

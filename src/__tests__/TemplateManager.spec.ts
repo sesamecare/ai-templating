@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { LangfuseClient } from '@langfuse/client';
 
 import { TemplateManager } from '../TemplateManager.js';
+import type { TemplateApp } from '../types.js';
 
 describe('TemplateManager.reloadFromLangfuse', () => {
   const roots: string[] = [];
@@ -368,12 +369,12 @@ function createPromptDetail(name: string, version: number, labels: string[]) {
   };
 }
 
-const immediateSetTimeout: typeof setTimeout = ((callback: TimerHandler) => {
+const immediateSetTimeout = (callback: TimerHandler) => {
   if (typeof callback === 'function') {
     callback();
   }
-  return 0 as never;
-}) as typeof setTimeout;
+  return 0 as unknown as ReturnType<typeof setTimeout>;
+};
 
 function createApp() {
   return {
@@ -386,5 +387,5 @@ function createApp() {
         warn: vi.fn(),
       },
     },
-  };
+  } as unknown as TemplateApp;
 }
